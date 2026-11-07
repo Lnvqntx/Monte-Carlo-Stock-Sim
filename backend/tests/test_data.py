@@ -1,7 +1,9 @@
+import time
+
 import pandas as pd
 import pytest
 
-from core.data import fetch_prices
+from core.data import fetch_live_tbill_rate, fetch_prices
 from core.errors import DataFetchError, InsufficientDataError, InvalidTickerError
 from tests.conftest import make_gbm_prices
 
@@ -46,3 +48,37 @@ def test_success_cleans_nans_and_returns_metadata(patch_yf):
     assert data.currency == "INR"
     assert data.long_name == "Reliance Industries Limited"
     assert data.last_date == df.index[-1].date().isoformat()
+
+
+# --- live ^IRX risk-free rate ------------------------------------------------
+
+def test_live_tbill_rate_parses_percent_quote(patch_yf):
+    fake = patch_yf(pd.DataFrame({"Close": [3.61, 3.64, float("nan")]}))
+    assert fetch_live_tbill_rate() == pytest.approx(0.0364)
+    assert fake.calls[0]["timeout"] > 0
+
+
+def test_live_tbill_rate_none_on_network_error(patch_yf):
+    patch_yf(pd.DataFrame(), exc=ConnectionError("blocked"))
+    assert fetch_live_tbill_rate() is None
+
+
+@pytest.mark.parametrize("df", [pd.DataFrame(), pd.DataFrame({"Close": [float("nan")]}),
+                                pd.DataFrame({"Close": [99.0]})])
+def test_live_tbill_rate_none_on_empty_or_garbage(patch_yf, df):
+    patch_yf(df)
+    assert fetch_live_tbill_rate() is None
+
+
+def test_live_tbill_rate_times_out(monkeypatch):
+    import core.data as data_mod
+
+    class Slow:
+        def history(self, **kwargs):
+            time.sleep(1.0)
+            return pd.DataFrame({"Close": [3.6]})
+
+    monkeypatch.setattr(data_mod.yf, "Ticker", lambda symbol: Slow())
+    start = time.monotonic()
+    assert fetch_live_tbill_rate(timeout=0.05) is None
+    assert time.monotonic() - start < 0.5

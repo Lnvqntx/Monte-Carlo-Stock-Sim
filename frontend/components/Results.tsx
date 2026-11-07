@@ -1,6 +1,7 @@
 "use client";
 
 import { DEMO_MODE } from "@/lib/api";
+import { describeRateSource } from "@/lib/drift";
 import {
   describeVar,
   formatAnnualRate,
@@ -64,16 +65,37 @@ export function Results({ data }: { data: SimulateResponse }) {
     ["95th", analysis.final_price.p95],
   ];
 
-  const details: [string, string, string?][] = [
-    ["Drift μ (annual)", formatAnnualRate(parameters.mu, { signed: true }), "Mean log return × 252 + σ²/2"],
-    ["Volatility σ (annual)", formatAnnualRate(parameters.sigma), "Std. dev. of daily log returns × √252"],
-    ["Daily returns used", formatInteger(parameters.n_returns)],
-    ["Lookback", settings.lookback],
+  const riskFree = settings.drift === "risk_free";
+  const muHistorical = parameters.mu_historical ?? parameters.mu;
+  const rate = settings.risk_free_rate ?? parameters.mu;
+  const volatility: [string, string, string?] = [
+    "Volatility σ (annual)",
+    formatAnnualRate(parameters.sigma),
+    "Std. dev. of daily log returns × √252",
+  ];
+  const common: [string, string, string?][] = [
     ["Simulations", formatInteger(settings.n_sims)],
     ["Seed", String(settings.seed)],
     ["Horizon", horizon, `${formatInteger(settings.n_steps)} trading days`],
-    ["Drift model", settings.drift === "historical" ? "Historical" : settings.drift],
   ];
+  // Both modes show 8 cells so the grid stays full at 2 and 4 columns.
+  const details: [string, string, string?][] = riskFree
+    ? [
+        ["Drift model", "Risk-free", "Risk-neutral GBM: μ\u00a0=\u00a0r"],
+        ["Drift μ used (annual)", formatAnnualRate(rate, { signed: true }), describeRateSource(settings.rate_source)],
+        ["Historical μ (annual)", formatAnnualRate(muHistorical, { signed: true }), "Estimated from history, not used"],
+        volatility,
+        ["Lookback", settings.lookback, `${formatInteger(parameters.n_returns)} daily returns`],
+        ...common,
+      ]
+    : [
+        ["Drift model", "Historical", "μ estimated from past returns"],
+        ["Drift μ (annual)", formatAnnualRate(parameters.mu, { signed: true }), "Mean log return × 252 + σ²/2"],
+        volatility,
+        ["Daily returns used", formatInteger(parameters.n_returns)],
+        ["Lookback", settings.lookback],
+        ...common,
+      ];
 
   return (
     <div className="grid gap-5 sm:gap-6">
@@ -98,6 +120,7 @@ export function Results({ data }: { data: SimulateResponse }) {
             </h2>
             <p className="mt-1.5 text-sm text-sand/65">
               {horizon} ahead · {formatInteger(settings.n_steps)} trading days · {formatInteger(settings.n_sims)} simulated paths
+              {riskFree ? " · risk-free drift" : ""}
             </p>
           </div>
           <div className="sm:text-right">
@@ -210,7 +233,11 @@ export function Results({ data }: { data: SimulateResponse }) {
         <SectionTitle
           id="model-title"
           title="Model details"
-          description={`Parameters estimated from ${formatInteger(metadata.n_prices)} daily closes over the ${settings.lookback} lookback.`}
+          description={
+            riskFree
+              ? `Volatility estimated from ${formatInteger(metadata.n_prices)} daily closes over the ${settings.lookback} lookback; drift set to the risk-free rate.`
+              : `Parameters estimated from ${formatInteger(metadata.n_prices)} daily closes over the ${settings.lookback} lookback.`
+          }
         />
         <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-sand/10 bg-sand/10 grid-cols-2 lg:grid-cols-4">
           {details.map(([term, value, hint]) => (
@@ -221,6 +248,14 @@ export function Results({ data }: { data: SimulateResponse }) {
             </div>
           ))}
         </dl>
+        {riskFree ? (
+          <p className="mt-4 rounded-xl border border-accent/30 bg-accent/[0.07] px-4 py-3 text-sm leading-relaxed text-sand/80">
+            <span className="font-semibold text-sand">A neutral baseline, not a forecast.</span> Every path drifts at
+            the risk-free rate ({formatAnnualRate(rate)}), as in option pricing, so the spread comes from
+            volatility alone. The stock&apos;s historical drift was{" "}
+            <span className="font-semibold text-accent-text">{formatAnnualRate(muHistorical, { signed: true })}</span>.
+          </p>
+        ) : null}
       </Card>
     </div>
   );

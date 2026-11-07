@@ -88,11 +88,19 @@ def format_validation_errors(errors: list[dict[str, Any]]) -> str:
     return "; ".join(dict.fromkeys(parts)) or "Invalid input"
 
 
+def cache_key(req: SimulateRequest) -> tuple:
+    """Everything that changes the result. A live ^IRX rate can move within the TTL; that
+    staleness (at most CACHE_TTL_SECONDS) is accepted."""
+    return (req.ticker, req.horizon, req.lookback, req.n_sims, req.seed, req.drift,
+            req.risk_free_rate)
+
+
 def _run_trimmed(req: SimulateRequest) -> dict[str, Any]:
     """Run the core simulation and trim it, mapping core errors to APIError."""
     try:
         result = core.run_simulation(req.ticker, req.horizon, lookback=req.lookback,
-                                     n_sims=req.n_sims, seed=req.seed)
+                                     n_sims=req.n_sims, seed=req.seed, drift=req.drift,
+                                     risk_free_rate=req.risk_free_rate)
         return serialize_result(result)
     except InvalidTickerError:
         raise APIError(404, "invalid_ticker", INVALID_TICKER_MESSAGE.format(ticker=req.ticker))
@@ -171,7 +179,7 @@ def create_app() -> FastAPI:
               tags=["simulation"])
     def simulate(req: SimulateRequest, request: Request) -> dict[str, Any]:
         cache: TTLCache = request.app.state.cache
-        key = (req.ticker, req.horizon, req.lookback, req.n_sims, req.seed)
+        key = cache_key(req)
         cached = cache.get(key)
         if cached is not None:
             return cached

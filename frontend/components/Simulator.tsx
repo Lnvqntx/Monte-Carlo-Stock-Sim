@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SimulationError, simulate } from "@/lib/api";
 import { friendlyError, type FriendlyError } from "@/lib/errors";
-import { DEFAULTS, TICKER_RE, isHorizon, normalizeTicker, type HorizonValue } from "@/lib/options";
+import { DEFAULT_DRIFT, parseRatePercent, readDriftParams, writeDriftParams } from "@/lib/drift";
+import { DEFAULTS, TICKER_RE, isHorizon, normalizeTicker } from "@/lib/options";
 import type { SimulateResponse } from "@/lib/types";
 import { InputCard, type FieldErrors, type FormState } from "./InputCard";
 import { Results } from "./Results";
@@ -15,6 +16,8 @@ const INITIAL_FORM: FormState = {
   lookback: DEFAULTS.lookback,
   nSims: DEFAULTS.nSims,
   seed: String(DEFAULTS.seed),
+  drift: DEFAULT_DRIFT,
+  rate: "",
 };
 
 function validate(form: FormState): FieldErrors {
@@ -23,14 +26,20 @@ function validate(form: FormState): FieldErrors {
   if (!ticker) errors.ticker = "Enter a ticker symbol, e.g. AAPL or RELIANCE.NS.";
   else if (!TICKER_RE.test(ticker)) errors.ticker = "Tickers can only contain letters, digits and . - ^ =";
   if (!/^\d+$/.test(form.seed.trim())) errors.seed = "Seed must be a whole number of 0 or more.";
+  // The rate only matters with risk-free drift, so don't block historical runs on it.
+  if (form.drift === "risk_free") {
+    const rate = parseRatePercent(form.rate);
+    if (!rate.ok) errors.rate = rate.error;
+  }
   return errors;
 }
 
-/** Keep ticker + horizon in the URL so results are shareable. */
-function writeUrl(ticker: string, horizon: HorizonValue) {
+/** Keep ticker, horizon and (when not the default) drift + rate in the URL so results are shareable. */
+function writeUrl(ticker: string, form: FormState) {
   const params = new URLSearchParams(window.location.search);
   params.set("ticker", ticker);
-  params.set("horizon", horizon);
+  params.set("horizon", form.horizon);
+  writeDriftParams(params, { drift: form.drift, rate: form.rate });
   window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
 }
 
@@ -51,7 +60,7 @@ export function Simulator() {
 
     const ticker = normalizeTicker(next.ticker);
     lastFormRef.current = next;
-    writeUrl(ticker, next.horizon);
+    writeUrl(ticker, next);
 
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -68,6 +77,7 @@ export function Simulator() {
       });
     }
 
+    const rate = next.drift === "risk_free" ? parseRatePercent(next.rate) : null;
     try {
       const data = await simulate(
         {
@@ -76,6 +86,8 @@ export function Simulator() {
           lookback: next.lookback,
           n_sims: next.nSims,
           seed: Number(next.seed),
+          drift: next.drift,
+          ...(rate?.ok && rate.rate !== undefined ? { risk_free_rate: rate.rate } : {}),
         },
         controller.signal,
       );
@@ -93,7 +105,7 @@ export function Simulator() {
     }
   }, []);
 
-  // Auto-run when the page opens with ?ticker=...&horizon=...
+  // Auto-run when the page opens with ?ticker=...&horizon=...[&drift=risk_free&rate=4.5]
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const ticker = normalizeTicker(params.get("ticker") ?? "");
@@ -103,6 +115,7 @@ export function Simulator() {
       ...INITIAL_FORM,
       ticker,
       horizon: isHorizon(horizonParam) ? horizonParam : DEFAULTS.horizon,
+      ...readDriftParams(params),
     };
     queueMicrotask(() => {
       setForm(initial);
@@ -115,6 +128,9 @@ export function Simulator() {
     setForm((f) => ({ ...f, ...patch }));
     if (patch.ticker !== undefined && fieldErrors.ticker) setFieldErrors((e) => ({ ...e, ticker: undefined }));
     if (patch.seed !== undefined && fieldErrors.seed) setFieldErrors((e) => ({ ...e, seed: undefined }));
+    if ((patch.rate !== undefined || patch.drift !== undefined) && fieldErrors.rate) {
+      setFieldErrors((e) => ({ ...e, rate: undefined }));
+    }
   };
 
   const pickExample = (ticker: string) => {

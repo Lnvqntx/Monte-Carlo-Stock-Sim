@@ -53,6 +53,7 @@ export function Segmented<T extends string | number>({
   onChange,
   disabled,
   size = "md",
+  describedBy,
 }: {
   name: string;
   legend: string;
@@ -61,9 +62,11 @@ export function Segmented<T extends string | number>({
   onChange: (value: T) => void;
   disabled?: boolean;
   size?: "md" | "sm";
+  /** id of a hint element describing the group. */
+  describedBy?: string;
 }) {
   return (
-    <fieldset disabled={disabled} className="min-w-0">
+    <fieldset disabled={disabled} className="min-w-0" aria-describedby={describedBy}>
       <legend className="text-sm font-medium text-sand/90">{legend}</legend>
       <div
         className="mt-2 grid gap-1 rounded-xl border border-sand/12 bg-forest-950/60 p-1"

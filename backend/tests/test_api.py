@@ -58,9 +58,11 @@ def mock_run(monkeypatch):
     calls: list[dict] = []
 
     def _install(outcome):
-        def fake(ticker, horizon, lookback="2y", n_sims=10_000, seed=42):
+        def fake(ticker, horizon, lookback="2y", n_sims=10_000, seed=42, drift="historical",
+                 risk_free_rate=None):
             calls.append(dict(ticker=ticker, horizon=horizon, lookback=lookback,
-                              n_sims=n_sims, seed=seed))
+                              n_sims=n_sims, seed=seed, drift=drift,
+                              risk_free_rate=risk_free_rate))
             if isinstance(outcome, Exception):
                 raise outcome
             return outcome
@@ -110,7 +112,8 @@ def test_simulate_returns_trimmed_result(client, mock_run, result_5y):
     body = resp.json()
 
     # Request was normalised and defaults applied.
-    assert calls == [dict(ticker="AAPL", horizon="5y", lookback="2y", n_sims=10_000, seed=42)]
+    assert calls == [dict(ticker="AAPL", horizon="5y", lookback="2y", n_sims=10_000, seed=42,
+                      drift="historical", risk_free_rate=None)]
 
     assert set(body) == {"metadata", "parameters", "settings", "analysis"}
     a = body["analysis"]
@@ -232,6 +235,14 @@ def test_errors_are_not_cached(client, mock_run):
     ({"ticker": "A" * 21, "horizon": "6m"}, "ticker"),
     ({"horizon": "6m"}, "ticker"),
     ({"ticker": "AAPL"}, "horizon"),
+    ({"ticker": "AAPL", "horizon": "6m", "drift": "neutral"}, "drift"),
+    ({"ticker": "AAPL", "horizon": "6m", "drift": "risk_free", "risk_free_rate": 0.2501},
+     "risk_free_rate"),
+    ({"ticker": "AAPL", "horizon": "6m", "drift": "risk_free", "risk_free_rate": -0.06},
+     "risk_free_rate"),
+    ({"ticker": "AAPL", "horizon": "6m", "drift": "risk_free", "risk_free_rate": "4%"},
+     "risk_free_rate"),
+    ({"ticker": "AAPL", "horizon": "6m", "risk_free_rate": 0.04}, "risk_free_rate"),
 ])
 def test_invalid_input_422(client, mock_run, result_6m, body, field):
     calls = mock_run(result_6m)
@@ -350,3 +361,68 @@ def test_serialize_is_json_ready(result_6m):
     out = serialize_result(result_6m)
     json.dumps(out)
     assert result_6m["analysis"]["sample_paths"].__len__() == 100  # input untouched
+
+
+# --- drift options --------------------------------------------------------------
+
+def test_drift_defaults_to_historical(client, mock_run, result_6m):
+    calls = mock_run(result_6m)
+    assert client.post("/api/simulate", json={"ticker": "AAPL", "horizon": "6m"}).status_code == 200
+    assert calls[0]["drift"] == "historical" and calls[0]["risk_free_rate"] is None
+
+
+def test_risk_free_options_passed_through(client, mock_run, result_6m):
+    calls = mock_run(result_6m)
+    for body in ({"drift": "risk_free"}, {"drift": "risk_free", "risk_free_rate": 0.045},
+                 {"drift": "risk_free", "risk_free_rate": -0.05},
+                 {"drift": "risk_free", "risk_free_rate": 0.25}):
+        resp = client.post("/api/simulate", json={"ticker": "AAPL", "horizon": "6m", **body})
+        assert resp.status_code == 200, resp.text
+    assert [(c["drift"], c["risk_free_rate"]) for c in calls] == [
+        ("risk_free", None), ("risk_free", 0.045), ("risk_free", -0.05), ("risk_free", 0.25)]
+
+
+def test_rate_without_risk_free_message(client):
+    msg = assert_error(client.post("/api/simulate", json={
+        "ticker": "AAPL", "horizon": "6m", "risk_free_rate": 0.04}), 422, "invalid_input")
+    assert msg == "risk_free_rate can only be set when drift is 'risk_free'"
+
+
+def test_cache_key_distinguishes_drift_and_rate(client, mock_run, result_6m):
+    calls = mock_run(result_6m)
+    base = {"ticker": "AAPL", "horizon": "6m"}
+    bodies = [base, {**base, "drift": "historical"}, {**base, "drift": "risk_free"},
+              {**base, "drift": "risk_free"}, {**base, "drift": "risk_free", "risk_free_rate": 0.04},
+              {**base, "drift": "risk_free", "risk_free_rate": 0.04},
+              {**base, "drift": "risk_free", "risk_free_rate": 0.05}]
+    for b in bodies:
+        assert client.post("/api/simulate", json=b).status_code == 200
+    assert [(c["drift"], c["risk_free_rate"]) for c in calls] == [
+        ("historical", None), ("risk_free", None), ("risk_free", 0.04), ("risk_free", 0.05)]
+
+
+def test_cache_key_function():
+    from api.schemas import SimulateRequest
+
+    a = SimulateRequest(ticker="AAPL", horizon="6m")
+    b = SimulateRequest(ticker="AAPL", horizon="6m", drift="risk_free")
+    c = SimulateRequest(ticker="AAPL", horizon="6m", drift="risk_free", risk_free_rate=0.04)
+    assert len({api_main.cache_key(r) for r in (a, b, c)}) == 3
+
+
+def test_end_to_end_risk_free_through_real_core(client, monkeypatch):
+    """Real run_simulation (fetch mocked): response carries both mus and the rate source."""
+    from core.data import PriceData
+    from tests.conftest import make_gbm_prices
+
+    prices = make_gbm_prices(504, seed=9)
+    monkeypatch.setattr(core, "fetch_prices", lambda t, lookback="2y": PriceData(
+        prices, t, "USD", "Test", prices.index[-1].date().isoformat()))
+    monkeypatch.setattr("core.rates.fetch_live_tbill_rate", lambda: 0.0375)
+    body = client.post("/api/simulate", json={"ticker": "AAPL", "horizon": "6m", "n_sims": 1000,
+                                              "drift": "risk_free"}).json()
+    assert body["parameters"]["mu"] == 0.0375
+    assert "mu_historical" in body["parameters"]
+    assert body["settings"]["drift"] == "risk_free"
+    assert body["settings"]["risk_free_rate"] == 0.0375
+    assert body["settings"]["rate_source"] == "live ^IRX"

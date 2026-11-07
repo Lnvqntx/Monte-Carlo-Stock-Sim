@@ -10,9 +10,10 @@
 - **Architecture:** monorepo.
   - `backend/` = Python (core library, CLI, FastAPI).
   - `frontend/` = Next.js + TypeScript + Tailwind, deployed on Vercel.
-- **Phases:** 1 core library, 2 CLI, 3 FastAPI, 4 Next.js frontend, 5 deploy, 6 README, 7 extras. Phases 1-6 are done; next is 7 (extras).
+- **Phases:** 1 core library, 2 CLI, 3 FastAPI, 4 Next.js frontend, 5 deploy, 6 README, 7 extras. Phases 1-6 are done; 7a (risk-free drift option) is done; rest of 7 next.
 - **Live:** website https://monte-carlo-stock-sim.vercel.app, API https://monte-carlo-stock-api.vercel.app (docs at `/docs`).
-- **Defaults:** 2-year lookback, 10,000 simulations, 252 trading days/year, fixed seed 42, historical drift by default (risk-free drift added later), US and Indian (`.NS` / `.BO`) tickers.
+- **Defaults:** 2-year lookback, 10,000 simulations, 252 trading days/year, fixed seed 42, historical drift by default (risk-free drift optional), US and Indian (`.NS` / `.BO`) tickers.
+- **Drift models:** `drift="historical"` (default) uses mu estimated from log returns; `drift="risk_free"` sets mu = r (risk-neutral GBM), sigma still from history, and the historical mu is still returned (`parameters.mu` = drift used, `parameters.mu_historical`; `settings.risk_free_rate` / `settings.rate_source`, both null for historical). Rate order: user override (decimal, -0.05..0.25) > live `^IRX` for USD (`core/data.py` `fetch_live_tbill_rate`, 3 s timeout, None on failure) > `core/rates.py` defaults (USD 3.70%, INR 5.35%, generic 4.00%, "as of" note in the file; update there). Sources: "user override", "live ^IRX", "default for USD/INR", "generic default". A rate without `risk_free` drift is rejected (API 422, CLI error).
 - **Design (60/30/10 colour rule):**
   - 60% Forest Green `#1F3D2B` — main background.
   - 30% Sand Beige `#E8DCC4` — cards, text, secondary surfaces.
@@ -25,20 +26,20 @@
 - API (from `backend/`): `uvicorn api.main:app --reload`, then open http://127.0.0.1:8000/docs
   - `GET /` -> service name, description and links (`/docs`, `/api/health`, website).
   - `GET /api/health` -> `{"status": "ok"}`
-  - `POST /api/simulate` body: `ticker`, `horizon` (required, max 5y), `lookback` (`6mo|1y|2y|5y`, default `2y`), `n_sims` (1000-20000, default 10000), `seed` (default 42).
+  - `POST /api/simulate` body: `ticker`, `horizon` (required, max 5y), `lookback` (`6mo|1y|2y|5y`, default `2y`), `n_sims` (1000-20000, default 10000), `seed` (default 42), `drift` (`historical|risk_free`, default `historical`), `risk_free_rate` (optional decimal -0.05..0.25, only with `risk_free`). Cache key includes drift and rate.
   - Errors are always `{"error": {"code", "message"}}`: `invalid_ticker` 404, `insufficient_data` 422, `invalid_input` 422, `data_unavailable` 502, `internal_error` 500.
   - Env vars: `ALLOWED_ORIGINS` (comma-separated, default `http://localhost:3000`), `CACHE_TTL_SECONDS` (default 900, 0 disables), `CACHE_MAX_ENTRIES` (default 100).
 - CLI (from `backend/`): `python cli.py --ticker AAPL --horizon 6m`
-  - Options: `--lookback 2y`, `--sims 10000`, `--seed 42`, `--save DIR` (default `./output`), `--no-show` (save charts without opening windows), `--json FILE` (write the full `run_simulation` result).
+  - Options: `--lookback 2y`, `--sims 10000`, `--seed 42`, `--save DIR` (default `./output`), `--no-show` (save charts without opening windows), `--json FILE` (write the full `run_simulation` result), `--drift {historical,risk_free}`, `--rate FLOAT` (decimal, only with `--drift risk_free`).
   - Charts are saved as `<TICKER>_<horizon>_paths.png` and `<TICKER>_<horizon>_hist.png`.
-- Tests (from `backend/`): `python -m pytest` (no network; yfinance and `run_simulation` are mocked).
+- Tests (from `backend/`): `python -m pytest` (no network; yfinance and `run_simulation` are mocked; an autouse fixture in `tests/conftest.py` makes the live `^IRX` lookup return None).
 - Frontend (from `frontend/`, Node 22+): `npm install`, then `cp .env.example .env.local` (sets `BACKEND_URL=http://localhost:8000`), then `npm run dev` and open http://localhost:3000
   - Run both together locally: terminal 1 `cd backend && source .venv/bin/activate && uvicorn api.main:app --reload` (port 8000); terminal 2 `cd frontend && npm run dev` (port 3000). The browser calls the relative `/api/simulate`; `next.config.ts` rewrites `/api/*` to `BACKEND_URL` only when it is a valid http(s) URL (validated by `lib/backend-url.ts`; read at build time). Do not add Next.js API routes under `/api`.
-  - Demo mode (no backend / no Yahoo access): `NEXT_PUBLIC_DEMO_MODE=true npm run dev` serves `mocks/sample-response.json`. Regenerate it with `npm run generate:mock` (needs the backend venv active; uses `core` + `api.serialize` on synthetic prices).
-  - Checks: `npm run lint`, `npm test` (Vitest: formatting helpers, error-code mapping, chart data), `npm run build`.
-  - Layout: `app/` (layout with site metadata + Open Graph/Twitter tags, page, globals.css with the palette tokens, `opengraph-image.tsx` generated share card), `components/` (BackgroundGlow = fixed page-wide glow that follows the cursor and drifts, paused when hidden, static with reduced motion; Simulator = state + URL sync, InputCard, Results, FanChart, HistogramChart, States, HowItWorks), `lib/` (`types.ts` mirrors the API response, `api.ts` fetch + demo mode, `errors.ts` code -> friendly copy, `format.ts` Intl money/percent/date, `chart.ts` Recharts data + nice axis ticks + reference-label layout, `options.ts` tickers/horizons/defaults, `site.ts` site URL/name/description).
+  - Demo mode (no backend / no Yahoo access): `NEXT_PUBLIC_DEMO_MODE=true npm run dev` serves `mocks/sample-response.json` (or `mocks/sample-response-risk-free.json` when drift is risk-free; a rate override is not reflected in demo data). Regenerate both with `npm run generate:mock` (needs the backend venv active; uses `core.simulate_from_prices` + `api.serialize` on synthetic prices, live rate disabled).
+  - Checks: `npm run lint`, `npm test` (Vitest: formatting helpers, error-code mapping, chart data, drift/rate parsing + URL params), `npm run build`.
+  - Layout: `app/` (layout with site metadata + Open Graph/Twitter tags, page, globals.css with the palette tokens, `opengraph-image.tsx` generated share card), `components/` (BackgroundGlow = fixed page-wide glow that follows the cursor and drifts, paused when hidden, static with reduced motion; Simulator = state + URL sync, InputCard, Results, FanChart, HistogramChart, States, HowItWorks), `lib/` (`types.ts` mirrors the API response, `api.ts` fetch + demo mode, `errors.ts` code -> friendly copy, `format.ts` Intl money/percent/date, `chart.ts` Recharts data + nice axis ticks + reference-label layout, `options.ts` tickers/horizons/defaults, `drift.ts` drift options + rate % parsing + `drift`/`rate` URL params (omitted for historical so default URLs are unchanged), `site.ts` site URL/name/description).
   - Downside figures (probability of loss, VaR, negative changes) use terracotta `#E07A5F`; purple text uses the lighter tint `#B39DFB` for contrast.
-- Code layout: `core/` = maths (do not change for UI work), `cli.py` = terminal UI on `core.run_simulation`, `plots.py` = matplotlib charts.
+- Code layout: `core/` = maths (do not change for UI work; `rates.py` = risk-free rate defaults + resolution), `cli.py` = terminal UI on `core.run_simulation`, `plots.py` = matplotlib charts.
   - `api/` = FastAPI: `main.py` (app, routes, error handlers, CORS), `schemas.py` (Pydantic models + validation), `serialize.py` (downsamples to <= 200 points + `days` axis, 50 sample paths), `cache.py` (in-memory TTL cache of trimmed results).
 
 ## Docs

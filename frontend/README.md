@@ -22,7 +22,7 @@ npm run dev
 
 Open http://localhost:3000. `.env.local` sets `BACKEND_URL=http://localhost:8000`.
 
-- **Demo mode** (no backend needed): `NEXT_PUBLIC_DEMO_MODE=true npm run dev` serves `mocks/sample-response.json`.
+- **Demo mode** (no backend needed): `NEXT_PUBLIC_DEMO_MODE=true npm run dev` serves `mocks/sample-response.json` (historical) or `mocks/sample-response-risk-free.json` (risk-free drift).
 - **Regenerate the mock**: `npm run generate:mock` (backend venv active).
 - **Checks**: `npm run lint`, `npm test` (Vitest), `npm run build`.
 
@@ -30,6 +30,6 @@ Open http://localhost:3000. `.env.local` sets `BACKEND_URL=http://localhost:8000
 
 - `app/`: root layout and metadata, the page, `globals.css` (palette tokens), generated Open Graph image.
 - `components/`: `Simulator` (state + URL sync), `InputCard`, `Results`, `FanChart`, `HistogramChart`, `HowItWorks`, loading/error states.
-- `lib/`: API client and demo mode, response types, error-code copy, money/percent formatting, chart data helpers, site constants.
+- `lib/`: API client and demo mode, response types, drift options and rate parsing, error-code copy, money/percent formatting, chart data helpers, site constants.
 
 Deployment: see [DEPLOY.md](../DEPLOY.md).

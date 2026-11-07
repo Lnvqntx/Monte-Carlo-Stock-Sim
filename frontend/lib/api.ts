@@ -28,7 +28,7 @@ export function backendUnreachableCode(env: string | undefined = process.env.NOD
   return env === "production" ? "data_unavailable" : "network_error";
 }
 
-async function simulateDemo(signal?: AbortSignal): Promise<SimulateResponse> {
+async function simulateDemo(req: SimulateRequest, signal?: AbortSignal): Promise<SimulateResponse> {
   // Short pause so loading states are visible in demo mode.
   await new Promise<void>((resolve, reject) => {
     const t = setTimeout(resolve, 650);
@@ -37,13 +37,16 @@ async function simulateDemo(signal?: AbortSignal): Promise<SimulateResponse> {
       reject(new DOMException("Aborted", "AbortError"));
     });
   });
-  const mod = await import("@/mocks/sample-response.json");
+  const mod =
+    req.drift === "risk_free"
+      ? await import("@/mocks/sample-response-risk-free.json")
+      : await import("@/mocks/sample-response.json");
   return (mod.default ?? mod) as unknown as SimulateResponse;
 }
 
 /** POST /api/simulate (relative path; proxied to the Python API by the BACKEND_URL rewrite in next.config). */
 export async function simulate(req: SimulateRequest, signal?: AbortSignal): Promise<SimulateResponse> {
-  if (DEMO_MODE) return simulateDemo(signal);
+  if (DEMO_MODE) return simulateDemo(req, signal);
 
   let res: Response;
   try {

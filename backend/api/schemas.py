@@ -5,9 +5,10 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from core import TRADING_DAYS_PER_YEAR, parse_horizon
+from core.rates import MAX_RATE, MIN_RATE
 
 MAX_HORIZON_YEARS = 5
 MAX_HORIZON_DAYS = MAX_HORIZON_YEARS * TRADING_DAYS_PER_YEAR
@@ -16,6 +17,7 @@ MAX_SIMS = 20_000
 TICKER_RE = re.compile(r"^[A-Z0-9.\-^=]{1,20}$")
 
 Lookback = Literal["6mo", "1y", "2y", "5y"]
+Drift = Literal["historical", "risk_free"]
 
 
 class SimulateRequest(BaseModel):
@@ -25,7 +27,9 @@ class SimulateRequest(BaseModel):
         extra="ignore",
         json_schema_extra={"examples": [{"ticker": "AAPL", "horizon": "6m"},
                                         {"ticker": "RELIANCE.NS", "horizon": "1y",
-                                         "lookback": "5y", "n_sims": 5000, "seed": 7}]},
+                                         "lookback": "5y", "n_sims": 5000, "seed": 7},
+                                        {"ticker": "AAPL", "horizon": "1y", "drift": "risk_free",
+                                         "risk_free_rate": 0.045}]},
     )
 
     ticker: str = Field(..., description="Stock symbol, e.g. AAPL or RELIANCE.NS / TCS.BO")
@@ -33,6 +37,14 @@ class SimulateRequest(BaseModel):
     lookback: Lookback = Field("2y", description="History window used to estimate parameters")
     n_sims: int = Field(10_000, ge=MIN_SIMS, le=MAX_SIMS, description="Number of simulated paths")
     seed: int = Field(42, ge=0, description="Random seed (non-negative integer)")
+    drift: Drift = Field("historical", description=(
+        "historical: drift estimated from past log returns. risk_free: drift = the annual "
+        "risk-free rate (risk-neutral GBM); volatility is still estimated from history."))
+    risk_free_rate: float | None = Field(
+        None, ge=MIN_RATE, le=MAX_RATE, allow_inf_nan=False,
+        description=("Annual risk-free rate as a decimal (0.045 = 4.5%), only with "
+                     "drift=risk_free. Default: live 13-week T-bill (^IRX) for USD, "
+                     "else a per-currency default."))
 
     @field_validator("ticker")
     @classmethod
@@ -53,6 +65,12 @@ class SimulateRequest(BaseModel):
         if h.n_days > MAX_HORIZON_DAYS:
             raise ValueError(f"horizon must be at most {MAX_HORIZON_YEARS}y, got {h.label!r}")
         return h.label
+
+    @model_validator(mode="after")
+    def _check_rate_needs_risk_free(self) -> "SimulateRequest":
+        if self.risk_free_rate is not None and self.drift != "risk_free":
+            raise ValueError("risk_free_rate can only be set when drift is 'risk_free'")
+        return self
 
 
 class HealthResponse(BaseModel):

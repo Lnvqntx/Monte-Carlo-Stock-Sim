@@ -5,6 +5,9 @@
 
 export type Lookback = "6mo" | "1y" | "2y" | "5y";
 
+/** historical: mu estimated from past log returns. risk_free: mu = annual risk-free rate (risk-neutral GBM). */
+export type DriftModel = "historical" | "risk_free";
+
 /** Body of POST /api/simulate. */
 export interface SimulateRequest {
   ticker: string;
@@ -15,6 +18,10 @@ export interface SimulateRequest {
   n_sims?: number;
   /** Non-negative integer. */
   seed?: number;
+  /** Default "historical". */
+  drift?: DriftModel;
+  /** Annual decimal (0.045 = 4.5%), -0.05 to 0.25. Only allowed with drift "risk_free". */
+  risk_free_rate?: number;
 }
 
 /** core.data.PriceData.metadata() */
@@ -32,8 +39,10 @@ export interface SimulationMetadata {
 export interface SimulationParameters {
   /** Last close, the starting price of every path. */
   S0: number;
-  /** Annualized arithmetic drift (0.12 = 12% / year). */
+  /** Annualized drift actually simulated (0.12 = 12% / year): the historical estimate or the risk-free rate. */
   mu: number;
+  /** Annualized drift estimated from history (always computed; equals `mu` for historical drift). */
+  mu_historical: number;
   /** Annualized volatility (0.25 = 25% / year). */
   sigma: number;
   /** Number of daily log returns used for the estimate. */
@@ -49,7 +58,11 @@ export interface SimulationSettings {
   n_sims: number;
   seed: number;
   trading_days_per_year: number;
-  drift: string;
+  drift: DriftModel;
+  /** Rate used as the drift when drift is "risk_free"; null for historical drift. */
+  risk_free_rate: number | null;
+  /** Where the rate came from, e.g. "live ^IRX", "default for INR", "user override"; null for historical. */
+  rate_source: string | null;
 }
 
 export interface FinalPriceStats {
