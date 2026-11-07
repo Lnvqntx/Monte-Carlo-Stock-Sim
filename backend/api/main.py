@@ -41,6 +41,7 @@ INVALID_TICKER_MESSAGE = (
 )
 DATA_UNAVAILABLE_MESSAGE = "The market data provider is unavailable. Try again shortly."
 INTERNAL_ERROR_MESSAGE = "Something went wrong while running the simulation."
+WEBSITE_URL = "https://monte-carlo-stock-sim.vercel.app"
 
 
 class APIError(Exception):
@@ -149,6 +150,16 @@ def create_app() -> FastAPI:
         500: {"model": ErrorResponse, "description": "Unexpected error (internal_error)"},
         502: {"model": ErrorResponse, "description": "Data provider unavailable (data_unavailable)"},
     }
+
+    @app.get("/", tags=["meta"])
+    def root() -> dict[str, Any]:
+        """Friendly landing response pointing at the docs, health check and website."""
+        return {
+            "service": "Monte Carlo Stock Simulator API",
+            "description": ("GBM Monte Carlo simulation of stock prices from Yahoo Finance "
+                            "history. POST /api/simulate to run one. Not financial advice."),
+            "links": {"docs": "/docs", "health": "/api/health", "website": WEBSITE_URL},
+        }
 
     @app.get("/api/health", response_model=HealthResponse, tags=["meta"])
     def health() -> dict[str, str]:

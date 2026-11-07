@@ -89,6 +89,18 @@ def test_health(client):
     assert resp.json() == {"status": "ok"}
 
 
+def test_root_lists_links(client):
+    resp = client.get("/")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["service"] == "Monte Carlo Stock Simulator API"
+    assert body["description"]
+    assert body["links"] == {"docs": "/docs", "health": "/api/health",
+                             "website": "https://monte-carlo-stock-sim.vercel.app"}
+    assert client.get(body["links"]["docs"]).status_code == 200
+    assert client.get(body["links"]["health"]).status_code == 200
+
+
 # --- successful simulation ----------------------------------------------------
 
 def test_simulate_returns_trimmed_result(client, mock_run, result_5y):
