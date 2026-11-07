@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.env
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+
+# Node / Next.js / Vercel
+node_modules/
+.next/
+out/
+.vercel/
+npm-debug.log*
+yarn-error.log*
+.env*.local
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
