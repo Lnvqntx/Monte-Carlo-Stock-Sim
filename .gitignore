@@ -11,6 +11,9 @@ env/
 .ruff_cache/
 .coverage
 htmlcov/
+
+# Simulator output (charts, JSON)
+output/
 dist/
 build/
 
