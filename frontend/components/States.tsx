@@ -2,16 +2,20 @@ import type { FriendlyError } from "@/lib/errors";
 import { AlertIcon, PathsIcon } from "./icons";
 import { Card, Skeleton } from "./ui";
 
-export function EmptyState() {
+export function EmptyState({ mode = "simulate" }: { mode?: "simulate" | "backtest" }) {
+  const backtest = mode === "backtest";
   return (
     <Card className="flex flex-col items-center px-6 py-14 text-center sm:py-20">
       <span className="flex size-14 items-center justify-center rounded-2xl border border-sand/15 bg-forest-950/60">
         <PathsIcon className="size-7 text-sand/80" />
       </span>
-      <h2 className="mt-5 text-lg font-semibold tracking-tight">Pick a stock to begin</h2>
+      <h2 className="mt-5 text-lg font-semibold tracking-tight">
+        {backtest ? "Test the model on the past" : "Pick a stock to begin"}
+      </h2>
       <p className="mt-2 max-w-md text-sm leading-relaxed text-sand/65">
-        Type a ticker or tap an example above, choose how far ahead to look, then run the simulation.
-        Results show up here.
+        {backtest
+          ? "Pick a ticker, then either one past start date or a rolling test across many. You'll see whether the real price stayed inside the forecast bands."
+          : "Type a ticker or tap an example above, choose how far ahead to look, then run the simulation. Results show up here."}
       </p>
     </Card>
   );

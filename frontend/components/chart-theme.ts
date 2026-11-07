@@ -4,6 +4,7 @@ export const CHART = {
   accentText: "#B39DFB",
   sand: "#E8DCC4",
   loss: "#E07A5F",
+  hit: "#9CCB9F",
   grid: "rgba(232, 220, 196, 0.08)",
   axis: "rgba(232, 220, 196, 0.55)",
   tooltipBg: "#11241A",

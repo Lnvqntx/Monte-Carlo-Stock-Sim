@@ -22,11 +22,13 @@ export function normalizeErrorCode(code: string | null | undefined): ErrorCode {
 
 /**
  * Turn an API error code into copy for the error alert.
- * `detail` is the API's own message; it's only shown for invalid_input, where it names the bad field.
+ * `detail` is the API's own message; it's only shown for invalid_input, where it names the bad field
+ * (or, for a backtest, the latest valid start date), and for a backtest's insufficient_data, where it
+ * names the earliest start date with a full lookback.
  */
 export function friendlyError(
   code: string | null | undefined,
-  { ticker, detail }: { ticker?: string; detail?: string } = {},
+  { ticker, detail, backtest = false }: { ticker?: string; detail?: string; backtest?: boolean } = {},
 ): FriendlyError {
   const symbol = ticker?.trim().toUpperCase() || "that ticker";
   const c = normalizeErrorCode(code);
@@ -39,6 +41,15 @@ export function friendlyError(
           "Check the symbol. Indian stocks need an exchange suffix: .NS for NSE or .BO for BSE (e.g. RELIANCE.NS). If the symbol is right, the data provider may be having a moment, so try again shortly.",
       };
     case "insufficient_data":
+      if (backtest) {
+        return {
+          code: c,
+          title: "Not enough price history for this backtest",
+          message:
+            detail?.trim() ||
+            `${symbol} doesn't have enough trading history before the start date. Pick a later start date or a shorter lookback under Advanced.`,
+        };
+      }
       return {
         code: c,
         title: "Not enough price history",
@@ -70,7 +81,7 @@ export function friendlyError(
       return {
         code: "internal_error",
         title: "Something went wrong",
-        message: "The simulation failed unexpectedly on the server. Please try again.",
+        message: `The ${backtest ? "backtest" : "simulation"} failed unexpectedly on the server. Please try again.`,
       };
   }
 }

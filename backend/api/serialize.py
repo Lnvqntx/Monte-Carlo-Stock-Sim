@@ -62,3 +62,19 @@ def serialize_result(
         "settings": result["settings"],
         "analysis": trimmed,
     }
+
+
+def serialize_backtest(
+    result: dict[str, Any],
+    max_points: int = MAX_POINTS,
+    n_sample_paths: int = N_SAMPLE_PATHS,
+) -> dict[str, Any]:
+    """Trim a backtest result. Single: like serialize_result, plus the actual path downsampled
+    onto the same `days` axis. Rolling results (<= 40 windows of scalars) pass through."""
+    if result.get("settings", {}).get("mode") == "rolling":
+        return result
+    trimmed = serialize_result(result, max_points, n_sample_paths)
+    bt = dict(result["backtest"])
+    bt["actual_path"] = _take(bt["actual_path"], trimmed["analysis"]["days"])
+    trimmed["backtest"] = bt
+    return trimmed

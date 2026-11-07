@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { backendUnreachableCode, DEMO_MODE, simulate, SimulationError } from "./api";
+import { backendUnreachableCode, backtest, DEMO_MODE, simulate, SimulationError } from "./api";
 import type { SimulateRequest } from "./types";
 
 const REQ: SimulateRequest = { ticker: "AAPL", horizon: "6m" };
@@ -64,5 +64,35 @@ describe("simulate", () => {
   it("reports network_error when the request itself fails", async () => {
     stubFetch(new TypeError("Failed to fetch"));
     expect(await codeOf(simulate(REQ))).toBe("network_error");
+  });
+});
+
+describe("backtest", () => {
+  it("posts to /api/backtest and returns a rolling result", async () => {
+    const fetchMock = vi.fn(() => Promise.resolve(Response.json({ summary: {}, windows: [] })));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await backtest({ mode: "rolling", ticker: "AAPL", horizon: "6m" });
+    expect("summary" in res).toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/backtest");
+    expect(JSON.parse(String(init.body))).toEqual({ mode: "rolling", ticker: "AAPL", horizon: "6m" });
+  });
+
+  it("passes through the API's error code and message", async () => {
+    stubFetch(Response.json({ error: { code: "invalid_input", message: "Start date is too recent" } }, { status: 422 }));
+    try {
+      await backtest({ mode: "single", ticker: "AAPL", horizon: "6m", start_date: "2026-10-01" });
+      throw new Error("expected failure");
+    } catch (err) {
+      expect((err as SimulationError).code).toBe("invalid_input");
+      expect((err as SimulationError).message).toBe("Start date is too recent");
+    }
+  });
+
+  it("rejects a body that isn't the requested kind of result", async () => {
+    stubFetch(Response.json({ analysis: {} }));
+    expect(await codeOf(backtest({ mode: "single", ticker: "AAPL", horizon: "6m", start_date: "2025-05-01" }))).toBe(
+      "network_error",
+    );
   });
 });

@@ -57,6 +57,15 @@ describe("friendlyError", () => {
     expect(e.message).not.toContain("Traceback");
   });
 
+  it("uses backtest copy and the API's detail for a backtest's insufficient_data", () => {
+    const detail = "Not enough price history for AAPL to backtest: the earliest start date is 2018-03-01.";
+    const e = friendlyError("insufficient_data", { ticker: "AAPL", detail, backtest: true });
+    expect(e.title).toBe("Not enough price history for this backtest");
+    expect(e.message).toBe(detail);
+    expect(friendlyError("insufficient_data", { ticker: "AAPL", backtest: true }).message).toMatch(/later start date/);
+    expect(friendlyError("internal_error", { backtest: true }).message).toMatch(/backtest failed/);
+  });
+
   it("treats unknown or missing codes as internal_error", () => {
     expect(friendlyError("not_found").code).toBe("internal_error");
     expect(friendlyError(undefined).code).toBe("internal_error");
