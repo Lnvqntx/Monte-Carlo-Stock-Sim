@@ -37,9 +37,11 @@ def mock_run(monkeypatch):
     calls: list[dict] = []
 
     def _install(outcome):
-        def fake(ticker, horizon, lookback="2y", n_sims=10_000, seed=42):
+        def fake(ticker, horizon, lookback="2y", n_sims=10_000, seed=42, drift="historical",
+                 risk_free_rate=None):
             calls.append(dict(ticker=ticker, horizon=horizon, lookback=lookback,
-                              n_sims=n_sims, seed=seed))
+                              n_sims=n_sims, seed=seed, drift=drift,
+                              risk_free_rate=risk_free_rate))
             if isinstance(outcome, Exception):
                 raise outcome
             return outcome
@@ -61,7 +63,8 @@ def test_normal_run_prints_key_numbers(mock_run, tmp_path, capsys):
     out = capsys.readouterr().out
 
     assert code == 0
-    assert calls == [dict(ticker="AAPL", horizon="6m", lookback="2y", n_sims=10_000, seed=42)]
+    assert calls == [dict(ticker="AAPL", horizon="6m", lookback="2y", n_sims=10_000, seed=42,
+                      drift="historical", risk_free_rate=None)]
     final = result["analysis"]["final_price"]
     assert "Apple Inc." in out and "AAPL" in out and "2026-11-06" in out
     assert "$200.00" in out
@@ -77,7 +80,8 @@ def test_options_passed_through(mock_run, tmp_path):
     calls = mock_run(make_result())
     assert run(tmp_path, "--ticker", "AAPL", "--horizon", "1y", "--lookback", "5y",
                "--sims", "500", "--seed", "7") == 0
-    assert calls == [dict(ticker="AAPL", horizon="1y", lookback="5y", n_sims=500, seed=7)]
+    assert calls == [dict(ticker="AAPL", horizon="1y", lookback="5y", n_sims=500, seed=7,
+                      drift="historical", risk_free_rate=None)]
 
 
 def test_inr_currency_symbol(mock_run, tmp_path, capsys):
@@ -171,3 +175,54 @@ def test_main_calls_only_run_simulation_for_numbers(mock_run, tmp_path, monkeypa
     for name in ("fetch_prices", "estimate_parameters", "simulate_gbm", "analyze"):
         monkeypatch.setattr(core, name, lambda *a, _n=name, **k: pytest.fail(f"cli called core.{_n}"))
     assert run(tmp_path, "--ticker", "AAPL", "--horizon", "6m") == 0
+
+
+# --- drift options --------------------------------------------------------------
+
+def make_rf_result(rate=0.0412, source="live ^IRX"):
+    result = make_result(mu=rate)
+    result["parameters"]["mu_historical"] = 0.31
+    result["settings"].update(drift="risk_free", risk_free_rate=rate, rate_source=source)
+    return result
+
+
+def test_drift_and_rate_passed_through(mock_run, tmp_path):
+    calls = mock_run(make_rf_result(0.045, "user override"))
+    assert run(tmp_path, "--ticker", "AAPL", "--horizon", "1y", "--drift", "risk_free",
+               "--rate", "0.045") == 0
+    assert calls[0]["drift"] == "risk_free" and calls[0]["risk_free_rate"] == 0.045
+
+
+def test_risk_free_summary_shows_model_rate_and_historical_mu(mock_run, tmp_path, capsys):
+    mock_run(make_rf_result())
+    assert run(tmp_path, "--ticker", "AAPL", "--horizon", "6m", "--drift", "risk_free") == 0
+    out = capsys.readouterr().out
+    assert "Risk-free (risk-neutral)" in out
+    assert "4.12% (live ^IRX)" in out
+    assert "31.00%" in out  # historical mu shown for comparison
+    assert "not a forecast" in out
+
+
+def test_historical_summary_shows_model(mock_run, tmp_path, capsys):
+    mock_run(make_result())
+    assert run(tmp_path, "--ticker", "AAPL", "--horizon", "6m") == 0
+    out = capsys.readouterr().out
+    assert "Historical" in out and "Risk-free rate" not in out
+
+
+@pytest.mark.parametrize("args,expected", [
+    (["--rate", "0.04"], "only applies with --drift risk_free"),
+    (["--drift", "risk_free", "--rate", "4.5"], "between -0.05 and 0.25"),
+    (["--drift", "risk_free", "--rate", "-0.1"], "between -0.05 and 0.25"),
+])
+def test_bad_rate_rejected(mock_run, tmp_path, capsys, args, expected):
+    calls = mock_run(make_result())
+    assert run(tmp_path, "--ticker", "AAPL", "--horizon", "6m", *args) == 1
+    assert expected in capsys.readouterr().err
+    assert calls == []
+
+
+def test_bad_drift_choice_is_usage_error(capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--ticker", "AAPL", "--horizon", "6m", "--drift", "neutral"])
+    assert exc.value.code == 2

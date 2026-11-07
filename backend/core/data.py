@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -11,6 +13,9 @@ import yfinance as yf
 from .errors import DataFetchError, InsufficientDataError, InvalidTickerError
 
 MIN_TRADING_DAYS = 60
+
+IRX_SYMBOL = "^IRX"  # CBOE 13-week T-bill yield index, quoted in percent (3.7 = 3.7%)
+LIVE_RATE_TIMEOUT_SECONDS = 3.0
 
 
 @dataclass(frozen=True)
@@ -84,3 +89,33 @@ def fetch_prices(ticker: str, lookback: str = "2y") -> PriceData:
     currency, long_name = _lookup_metadata(t)
     last_date = pd.Timestamp(prices.index[-1]).date().isoformat()
     return PriceData(prices, symbol, currency, long_name, last_date)
+
+
+def _download_irx(timeout: float) -> float | None:
+    df = yf.Ticker(IRX_SYMBOL).history(period="5d", interval="1d", auto_adjust=False,
+                                       timeout=timeout)
+    if df is None or df.empty or "Close" not in df.columns:
+        return None
+    closes = df["Close"].dropna()
+    if closes.empty:
+        return None
+    return float(closes.iloc[-1]) / 100.0
+
+
+def fetch_live_tbill_rate(timeout: float = LIVE_RATE_TIMEOUT_SECONDS) -> float | None:
+    """Latest 13-week US T-bill yield from ^IRX as a decimal (0.037), or None on any failure.
+
+    Never raises and never waits longer than about `timeout` seconds, so callers can fall
+    back to a default rate silently.
+    """
+    pool = ThreadPoolExecutor(max_workers=1)
+    try:
+        value = pool.submit(_download_irx, timeout).result(timeout=timeout)
+    except Exception:
+        return None
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+    # Reject garbage quotes (same bounds as user overrides in core.rates).
+    if value is None or not math.isfinite(value) or not -0.05 <= value <= 0.25:
+        return None
+    return value

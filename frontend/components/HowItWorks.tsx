@@ -56,6 +56,14 @@ export function HowItWorks() {
           <p className="text-sm leading-relaxed text-sand/70">
             The starting price is the latest close. The same seed and settings always reproduce the same paths.
           </p>
+          <h4 className="mt-5 text-sm font-semibold text-sand">Historical vs risk-neutral drift</h4>
+          <p className="mt-2 text-sm leading-relaxed text-sand/70">
+            By default μ is the historical estimate above, so the paths extend the stock&apos;s past trend. Choose{" "}
+            <span className="font-semibold text-sand">Risk-free</span> to set μ to the risk-free rate r instead (the
+            13-week US T-bill, or a default for Indian stocks), as option pricing does. σ still comes from history.
+            The expected price is then S₀·e<sup>rT</sup>: a neutral baseline that shows the spread from volatility
+            alone, not a forecast.
+          </p>
         </Card>
 
         <Card className="p-6 sm:p-7">

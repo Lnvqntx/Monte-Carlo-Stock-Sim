@@ -26,6 +26,7 @@ from core.errors import (
     InvalidTickerError,
     SimulatorError,
 )
+from core.rates import MAX_RATE, MIN_RATE
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -34,6 +35,11 @@ EXIT_USAGE = 2
 DISCLAIMER = (
     "Model output from a GBM simulation on historical data - not a price prediction "
     "or financial advice."
+)
+
+RISK_FREE_NOTE = (
+    "Risk-free drift: a neutral baseline where every path grows at the risk-free rate, "
+    "not a forecast of this stock's return."
 )
 
 
@@ -52,6 +58,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lookback", default="2y", help="History window for estimation (default: 2y)")
     p.add_argument("--sims", type=int, default=10_000, help="Number of simulations (default: 10000)")
     p.add_argument("--seed", type=int, default=42, help="Random seed (default: 42)")
+    p.add_argument("--drift", choices=core.DRIFT_MODELS, default="historical",
+                   help="Drift model: historical (estimated from past returns, default) or "
+                        "risk_free (drift = risk-free rate, a risk-neutral baseline)")
+    p.add_argument("--rate", type=float, metavar="FLOAT",
+                   help="Risk-free rate as a decimal, e.g. 0.045 (only with --drift risk_free; "
+                        "default: live 13-week T-bill for USD, else a per-currency default)")
     p.add_argument("--save", metavar="DIR", default="output",
                    help="Directory to save chart PNGs into (default: ./output)")
     p.add_argument("--no-show", action="store_true", help="Don't open chart windows (just save)")
@@ -79,7 +91,11 @@ def render_summary(console: Console, result: dict[str, Any]) -> None:
     p_table.add_column("Parameter")
     p_table.add_column("Value", justify="right")
     p_table.add_row("Current price (S0)", fmt_money(s0, prefix))
-    p_table.add_row("Annual drift (mu)", f"{params['mu'] * 100:.2f}%")
+    risk_free = settings.get("drift") == "risk_free"
+    p_table.add_row("Annual drift (mu)" + (" used" if risk_free else ""),
+                    f"{params['mu'] * 100:.2f}%")
+    if risk_free and params.get("mu_historical") is not None:
+        p_table.add_row("Historical drift (not used)", f"{params['mu_historical'] * 100:.2f}%")
     p_table.add_row("Annual volatility (sigma)", f"{params['sigma'] * 100:.2f}%")
     p_table.add_row("Daily returns used", f"{params['n_returns']:,}")
 
@@ -91,6 +107,14 @@ def render_summary(console: Console, result: dict[str, Any]) -> None:
     s_table.add_row("Simulations", f"{settings['n_sims']:,}")
     s_table.add_row("Lookback", settings["lookback"])
     s_table.add_row("Seed", str(settings["seed"]))
+    if risk_free:
+        s_table.add_row("Drift model", "Risk-free (risk-neutral)")
+        rate = settings.get("risk_free_rate")
+        if rate is not None:
+            s_table.add_row("Risk-free rate",
+                            f"{rate * 100:.2f}% ({settings.get('rate_source') or 'unknown'})")
+    else:
+        s_table.add_row("Drift model", "Historical")
 
     console.print(p_table)
     console.print(s_table)
@@ -116,6 +140,8 @@ def render_summary(console: Console, result: dict[str, Any]) -> None:
     r_table.add_row("95% Value at Risk", f"[bold magenta]{var_text}[/]")
     console.print(r_table)
 
+    if risk_free:
+        console.print(f"[dim italic]{RISK_FREE_NOTE}[/]")
     console.print(f"[dim italic]{DISCLAIMER}[/]")
 
 
@@ -152,11 +178,20 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.sims < 1:
         return _fail(err, "--sims must be at least 1.")
+    if args.rate is not None:
+        if args.drift != "risk_free":
+            return _fail(err, "--rate only applies with --drift risk_free.")
+        try:
+            core.validate_rate(args.rate)
+        except ValueError:
+            return _fail(err, f"--rate must be a decimal between {MIN_RATE} and {MAX_RATE} "
+                              f"(e.g. 0.045 for 4.5%), got {args.rate}.")
 
     try:
         with console.status(f"Fetching {ticker} and running {args.sims:,} simulations..."):
             result = core.run_simulation(
-                ticker, args.horizon, lookback=args.lookback, n_sims=args.sims, seed=args.seed
+                ticker, args.horizon, lookback=args.lookback, n_sims=args.sims, seed=args.seed,
+                drift=args.drift, risk_free_rate=args.rate,
             )
     except InvalidTickerError:
         return _fail(

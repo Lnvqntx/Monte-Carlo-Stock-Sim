@@ -46,3 +46,12 @@ def patch_yf(monkeypatch):
         return fake
 
     return _install
+
+
+@pytest.fixture(autouse=True)
+def no_live_rate(monkeypatch):
+    """Never hit Yahoo for ^IRX in tests: the live T-bill lookup reports "unavailable".
+
+    Tests that exercise the live path patch core.rates.fetch_live_tbill_rate themselves.
+    """
+    monkeypatch.setattr("core.rates.fetch_live_tbill_rate", lambda *a, **k: None)

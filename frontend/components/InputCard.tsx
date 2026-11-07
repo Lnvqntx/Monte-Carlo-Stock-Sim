@@ -1,9 +1,10 @@
 "use client";
 
 import type { FormEvent } from "react";
+import { DRIFTS } from "@/lib/drift";
 import { EXAMPLE_TICKERS, HORIZONS, LOOKBACKS, SIM_COUNTS, type HorizonValue } from "@/lib/options";
 import { formatInteger } from "@/lib/format";
-import type { Lookback } from "@/lib/types";
+import type { DriftModel, Lookback } from "@/lib/types";
 import { ChevronIcon, SpinnerIcon } from "./icons";
 import { Card, Segmented, cx } from "./ui";
 
@@ -13,11 +14,15 @@ export interface FormState {
   lookback: Lookback;
   nSims: number;
   seed: string;
+  drift: DriftModel;
+  /** Risk-free rate override in percent as typed; "" = server default. */
+  rate: string;
 }
 
 export interface FieldErrors {
   ticker?: string;
   seed?: string;
+  rate?: string;
 }
 
 export function InputCard({
@@ -119,12 +124,28 @@ export function InputCard({
             onChange={(horizon) => onChange({ horizon })}
           />
 
-          <details className="group rounded-xl border border-sand/12 bg-forest-950/30" open={Boolean(fieldErrors.seed) || undefined}>
+          <div>
+            <Segmented
+              name="drift"
+              legend="Drift"
+              size="sm"
+              options={DRIFTS}
+              value={form.drift}
+              onChange={(drift) => onChange({ drift })}
+              describedBy="drift-hint"
+            />
+            <p id="drift-hint" className="mt-2 text-xs leading-relaxed text-sand/55">
+              Historical uses the stock&apos;s past trend; risk-free grows at the T-bill rate, a neutral baseline.
+            </p>
+          </div>
+
+          <details className="group rounded-xl border border-sand/12 bg-forest-950/30" open={Boolean(fieldErrors.seed || fieldErrors.rate) || undefined}>
             <summary className="flex cursor-pointer items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm font-medium text-sand/90 hover:text-sand">
               <span>Advanced</span>
               <span className="flex min-w-0 items-center gap-2 text-xs font-normal text-sand/55">
                 <span className="truncate">
                   {form.lookback} lookback · {formatInteger(form.nSims)} sims · seed {form.seed || "–"}
+                  {form.drift === "risk_free" && form.rate.trim() ? ` · rate ${form.rate.trim().replace(/%$/, "")}%` : ""}
                 </span>
                 <ChevronIcon className="size-4 shrink-0 transition-transform group-open:rotate-180" />
               </span>
@@ -173,6 +194,41 @@ export function InputCard({
                 ) : null}
                 <p id="seed-hint" className="mt-2 text-xs text-sand/55">
                   Same seed and settings give the same result.
+                </p>
+              </div>
+              <div>
+                <label htmlFor="rate" className="text-sm font-medium text-sand/90">
+                  Risk-free rate %{" "}
+                  <span className="font-normal text-sand/50">(optional)</span>
+                </label>
+                <div className="relative mt-2">
+                  <input
+                    id="rate"
+                    name="rate"
+                    type="text"
+                    inputMode="decimal"
+                    autoComplete="off"
+                    placeholder="Default"
+                    value={form.rate}
+                    onChange={(e) => onChange({ rate: e.target.value })}
+                    aria-invalid={fieldErrors.rate ? true : undefined}
+                    aria-describedby={fieldErrors.rate ? "rate-error rate-hint" : "rate-hint"}
+                    className={cx(
+                      "block h-11 w-full rounded-xl border bg-forest-950/60 pl-3.5 pr-9 text-sand placeholder:text-sand/40 transition-colors focus:border-accent-text focus:outline-none focus:ring-4 focus:ring-accent/25 focus-visible:outline-none",
+                      fieldErrors.rate ? "border-sand/60" : "border-sand/15 hover:border-sand/30",
+                    )}
+                  />
+                  <span aria-hidden className="pointer-events-none absolute inset-y-0 right-3.5 flex items-center text-sm text-sand/50">
+                    %
+                  </span>
+                </div>
+                {fieldErrors.rate ? (
+                  <p id="rate-error" className="mt-2 text-sm font-medium text-sand">
+                    {fieldErrors.rate}
+                  </p>
+                ) : null}
+                <p id="rate-hint" className="mt-2 text-xs text-sand/55">
+                  Used only with risk-free drift. Blank uses the current T-bill rate for the stock&apos;s currency.
                 </p>
               </div>
             </div>

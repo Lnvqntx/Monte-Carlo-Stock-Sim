@@ -23,10 +23,11 @@ Enter a US or Indian ticker (e.g. `AAPL`, `RELIANCE.NS`) and a forecast horizon.
 
 - **Live market data** from Yahoo Finance (US tickers and NSE `.NS` / BSE `.BO`)
 - **Automatic parameter estimation**: drift and volatility from daily log returns
+- **Two drift models**: historical drift (default) or risk-free drift, a risk-neutral baseline at the live 13-week T-bill rate (USD) or a per-currency default, with an optional override
 - **Vectorised simulation**: 10,000 paths in a single NumPy operation, seeded and reproducible
 - **Risk metrics**: expected price, probability of loss, 95% Value at Risk, 5/25/50/75/95th percentile bands
 - **Interactive charts**: fan chart of simulated paths and a histogram of final prices
-- **Shareable URLs**: `?ticker=TCS.NS&horizon=1y` re-runs the same simulation
+- **Shareable URLs**: `?ticker=TCS.NS&horizon=1y` re-runs the same simulation (`&drift=risk_free&rate=4.5` for risk-free runs)
 - **CLI** with rich terminal output and saved matplotlib charts
 - **REST API** (FastAPI) with validation, consistent error codes and a result cache
 - **Currency aware**: ₹ with Indian digit grouping for `.NS` / `.BO`, $ for US stocks
@@ -57,13 +58,21 @@ $$
 
 The $+\tfrac{1}{2}\sigma^2$ term converts the mean *log* return into the arithmetic drift that GBM expects, so the $-\tfrac{1}{2}\sigma^2$ in the step cancels it and the median path follows the historical trend.
 
+**Historical vs risk-neutral drift.** By default the simulator uses the historical $\mu$ above, so paths extend the stock's past trend. With `drift = risk_free` it sets $\mu = r$, the annual risk-free rate, as in risk-neutral option pricing; $\sigma$ is still estimated from history and the historical $\mu$ is still returned for comparison ([`core/rates.py`](backend/core/rates.py)). The rate is chosen in this order:
+
+1. a user override (`risk_free_rate`, a decimal between −0.05 and 0.25);
+2. for USD stocks, the live 13-week T-bill yield from Yahoo's `^IRX` (3-second timeout, silent fallback);
+3. a per-currency default: USD 3.70% (13-week T-bill), INR 5.35% (91-day T-bill), otherwise a generic 4.00%.
+
+The response reports the rate and its source (`live ^IRX`, `default for INR`, `user override`, ...). The expected price becomes $S_0 e^{rT}$: a neutral baseline that isolates the spread due to volatility, not a forecast.
+
 **Validation.** Under GBM the expected final price is
 
 $$
 \mathbb{E}[S_T] = S_0\, e^{\mu T}
 $$
 
-and the test suite checks that the mean of 10,000 simulated final prices lands within four standard errors of this value ([`tests/test_simulate.py`](backend/tests/test_simulate.py)), along with zero-volatility, reproducibility and shape checks.
+and the test suite checks that the mean of 10,000 simulated final prices lands within four standard errors of this value ([`tests/test_simulate.py`](backend/tests/test_simulate.py)), along with zero-volatility, reproducibility and shape checks. With risk-free drift the same check runs against $S_0 e^{rT}$ ([`tests/test_run_simulation.py`](backend/tests/test_run_simulation.py)).
 
 **Risk metrics** ([`core/analyze.py`](backend/core/analyze.py)): probability of loss is the share of paths ending below $S_0$; 95% VaR is the loss, as a percentage of $S_0$, at the 5th percentile final price.
 
@@ -80,7 +89,7 @@ flowchart LR
 
 - **Two Vercel projects, one repo.** The website (`frontend/`) and the API (`backend/`) are deployed separately so each gets its native runtime: Next.js for the UI and a Python function for NumPy and pandas. The website rewrites `/api/*` to the API, so the browser only talks to one domain and no CORS setup is needed.
 - **Response trimming.** A full result (10,000 paths reduced to percentile bands, 100 sample paths, every trading day) is about 1.3 MB of JSON. The API downsamples time series to at most 200 points and keeps 50 sample paths, bringing a typical response to about 110 KB ([`api/serialize.py`](backend/api/serialize.py)).
-- **Caching.** Trimmed results are kept in an in-memory TTL cache for 15 minutes, keyed by ticker, horizon, lookback, simulation count and seed, so repeated and shared runs skip both Yahoo and the simulation ([`api/cache.py`](backend/api/cache.py)).
+- **Caching.** Trimmed results are kept in an in-memory TTL cache for 15 minutes, keyed by ticker, horizon, lookback, simulation count, seed, drift model and rate override, so repeated and shared runs skip both Yahoo and the simulation ([`api/cache.py`](backend/api/cache.py)).
 
 ## Example
 
@@ -97,13 +106,31 @@ Same 6-month horizon, 2-year lookback, 10,000 simulations, seed 42:
 
 Drift dominates the outcome: AAPL's strong historical trend pulls the whole distribution upward, so fewer than a third of paths end in a loss. HDFCBANK.NS has lower volatility, yet its slightly negative drift makes a loss more likely than not, and its VaR is higher. These figures depend on the run date, since the estimates come from the most recent two years of prices.
 
+### Historical vs risk-free drift
+
+<!-- TODO(Lnvqntx): fill in from a real run, e.g.
+     python cli.py --ticker AAPL --horizon 6m --no-show
+     python cli.py --ticker AAPL --horizon 6m --drift risk_free --no-show -->
+
+AAPL, 6-month horizon, 2-year lookback, 10,000 simulations, seed 42, run on **TODO date**:
+
+| AAPL | Historical drift | Risk-free drift |
+|---|---:|---:|
+| Drift μ used (annual) | **TODO%** | **TODO%** (TODO source, e.g. live ^IRX) |
+| Volatility σ (annual) | TODO% | TODO% (same) |
+| Expected price | \$TODO (TODO%) | \$TODO (TODO%) |
+| Probability of loss | TODO% | TODO% |
+| 95% VaR | TODO% | TODO% |
+
+Volatility is identical in both columns, so any difference comes from drift alone. TODO: one sentence on what the gap shows (e.g. how much of the historical upside comes from extrapolating the past trend).
+
 ![Histogram of final prices with percentile table and model details](docs/images/distribution.png)
 
 ## Limitations
 
 - **Constant volatility.** Real volatility clusters and spikes; GBM assumes one fixed $\sigma$.
 - **Normal returns, no fat tails.** Log returns are Gaussian, so extreme moves are under-represented and VaR is likely optimistic.
-- **Noisy historical drift.** A two-year mean return is a weak predictor of the future; small changes to the lookback can swing $\mu$ a lot.
+- **Noisy historical drift.** A two-year mean return is a weak predictor of the future; small changes to the lookback can swing $\mu$ a lot. Risk-free drift removes this input but is a baseline, not a prediction.
 - **No dividends, news or events.** Earnings, splits, dividends and macro shocks are not modelled.
 - **Unofficial data source.** Yahoo Finance via `yfinance` is unofficial and can be rate-limited or change without notice.
 
@@ -152,6 +179,10 @@ python cli.py --ticker AAPL --horizon 6m
 ```
 
 ```bash
+python cli.py --ticker AAPL --horizon 6m --drift risk_free --rate 0.045
+```
+
+```bash
 python cli.py --ticker RELIANCE.NS --horizon 1y --lookback 5y --sims 20000 --no-show --json output/reliance.json
 ```
 
@@ -186,12 +217,18 @@ Request body for `POST /api/simulate`:
 | `lookback` | string | `2y` | `6mo`, `1y`, `2y` or `5y` |
 | `n_sims` | integer | `10000` | 1,000 to 20,000 |
 | `seed` | integer | `42` | non-negative |
+| `drift` | string | `historical` | `historical` or `risk_free` |
+| `risk_free_rate` | number | auto | decimal, −0.05 to 0.25 (e.g. `0.045`); only with `drift: "risk_free"`. Default: live `^IRX` for USD, else per-currency default |
 
 ```bash
 curl -s -X POST https://monte-carlo-stock-api.vercel.app/api/simulate -H "Content-Type: application/json" -d '{"ticker": "AAPL", "horizon": "6m"}'
 ```
 
-The response contains `metadata` (ticker, currency, company name, last date), `parameters` (`S0`, `mu`, `sigma`), `settings`, and `analysis` (final-price stats, `expected_return_pct`, `prob_below_start`, `var_95_pct`, percentile bands, mean path, sample paths, histogram).
+```bash
+curl -s -X POST https://monte-carlo-stock-api.vercel.app/api/simulate -H "Content-Type: application/json" -d '{"ticker": "AAPL", "horizon": "6m", "drift": "risk_free"}'
+```
+
+The response contains `metadata` (ticker, currency, company name, last date), `parameters` (`S0`, `mu` = drift used, `mu_historical`, `sigma`), `settings` (including `drift`, `risk_free_rate` and `rate_source`, both `null` for historical drift), and `analysis` (final-price stats, `expected_return_pct`, `prob_below_start`, `var_95_pct`, percentile bands, mean path, sample paths, histogram).
 
 Errors always have the shape `{"error": {"code": "...", "message": "..."}}`:
 
@@ -208,7 +245,7 @@ Errors always have the shape `{"error": {"code": "...", "message": "..."}}`:
 ```
 .
 ├── backend/
-│   ├── core/            # maths: data fetch, horizon parsing, estimation, GBM simulation, risk analysis
+│   ├── core/            # maths: data fetch, horizon parsing, estimation, risk-free rates, GBM simulation, risk analysis
 │   ├── api/             # FastAPI app: routes, schemas, response trimming, TTL cache
 │   ├── tests/           # pytest suite (network mocked)
 │   ├── cli.py           # terminal interface
@@ -230,7 +267,6 @@ Both apps deploy to Vercel from this repository as two projects: the API with Ro
 
 ## Roadmap
 
-- Risk-free drift option (risk-neutral simulation)
 - Backtesting: compare past forecasts with realised prices
 - Fat-tailed returns (Student-t shocks)
 - Multi-asset portfolios with correlated paths
