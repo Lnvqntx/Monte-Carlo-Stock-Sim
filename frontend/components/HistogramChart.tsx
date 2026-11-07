@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { buildHistogramData, type HistogramBin } from "@/lib/chart";
+import { buildHistogramData, histogramAxis, layoutMarkers, type HistogramBin, type MarkerLayout } from "@/lib/chart";
 import { formatInteger, formatMoney, formatMoneyCompact, formatProbability } from "@/lib/format";
 import type { SimulateResponse } from "@/lib/types";
 import { AXIS_TICK, CHART } from "./chart-theme";
@@ -21,14 +21,16 @@ interface MarkerLabelProps {
   text: string;
   color: string;
   row: number;
+  anchor: MarkerLayout["anchor"];
 }
 
-/** Reference-line label drawn above the plot, staggered by `row` so nearby markers don't collide. */
-function MarkerLabel({ viewBox, text, color, row }: MarkerLabelProps) {
-  const x = viewBox?.x ?? 0;
-  const y = (viewBox?.y ?? 0) - 8 - row * 15;
+/** Reference-line label above the plot; row and side come from layoutMarkers so labels never collide. */
+function MarkerLabel({ viewBox, text, color, row, anchor }: MarkerLabelProps) {
+  const dx = anchor === "end" ? -5 : anchor === "start" ? 5 : 0;
+  const x = (viewBox?.x ?? 0) + dx;
+  const y = (viewBox?.y ?? 0) - 8 - row * 16;
   return (
-    <text x={x} y={y} textAnchor="middle" fill={color} fontSize={11} fontWeight={600}>
+    <text x={x} y={y} textAnchor={anchor} fill={color} fontSize={11} fontWeight={600}>
       {text}
     </text>
   );
@@ -54,15 +56,18 @@ export function HistogramChart({ data }: { data: SimulateResponse }) {
   const { analysis, metadata, parameters, settings } = data;
   const currency = metadata.currency;
   const bins = useMemo(() => buildHistogramData(analysis.histogram), [analysis.histogram]);
-  const edges = analysis.histogram.bin_edges;
+  const xAxis = useMemo(() => histogramAxis(analysis.histogram), [analysis.histogram]);
 
   const markers = [
     { x: analysis.final_price.p5, text: "5th pct", color: CHART.loss, dash: "4 3" },
     { x: parameters.S0, text: "Today", color: CHART.sand, dash: "5 5" },
     { x: analysis.final_price.median, text: "Median", color: CHART.sand, dash: undefined },
   ];
-  // Stagger label rows left-to-right so markers that sit close together stay readable.
-  const ordered = [...markers].sort((a, b) => a.x - b.x).map((m, i) => ({ ...m, row: i }));
+  const layout = layoutMarkers(
+    markers.map((m) => ({ key: m.text, x: m.x })),
+    xAxis.domain,
+  );
+  const placed = markers.map((m) => ({ ...m, ...layout.find((l) => l.key === m.text)! }));
 
   return (
     <div>
@@ -72,12 +77,14 @@ export function HistogramChart({ data }: { data: SimulateResponse }) {
         aria-label={`Histogram of ${formatInteger(settings.n_sims)} simulated final prices. Median ${formatMoney(analysis.final_price.median, currency)}, today ${formatMoney(parameters.S0, currency)}, 5th percentile ${formatMoney(analysis.final_price.p5, currency)}.`}
       >
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={bins} margin={{ top: 52, right: 16, bottom: 4, left: 0 }} barCategoryGap={1}>
+          <BarChart data={bins} margin={{ top: 56, right: 20, bottom: 4, left: 0 }} barCategoryGap={1}>
             <CartesianGrid stroke={CHART.grid} vertical={false} />
             <XAxis
               dataKey="mid"
               type="number"
-              domain={[edges[0], edges[edges.length - 1]]}
+              domain={xAxis.domain}
+              ticks={xAxis.ticks}
+              interval={0}
               tick={AXIS_TICK}
               tickLine={false}
               axisLine={{ stroke: CHART.grid }}
@@ -93,7 +100,7 @@ export function HistogramChart({ data }: { data: SimulateResponse }) {
               tickFormatter={(v: number) => formatProbability(v, 0)}
             />
             <Bar dataKey="share" fill={CHART.accent} fillOpacity={0.85} radius={[2, 2, 0, 0]} isAnimationActive={false} />
-            {ordered.map((m) => (
+            {placed.map((m) => (
               <ReferenceLine
                 key={m.text}
                 x={m.x}
@@ -101,7 +108,7 @@ export function HistogramChart({ data }: { data: SimulateResponse }) {
                 strokeWidth={1.5}
                 strokeDasharray={m.dash}
                 label={(props: { viewBox?: { x?: number; y?: number } }) => (
-                  <MarkerLabel viewBox={props.viewBox} text={m.text} color={m.color} row={m.row} />
+                  <MarkerLabel viewBox={props.viewBox} text={m.text} color={m.color} row={m.row} anchor={m.anchor} />
                 )}
               />
             ))}

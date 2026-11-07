@@ -56,19 +56,81 @@ export interface NiceAxis {
 }
 
 /**
- * Y axis from the 5-95% band (with padding), so outlier sample paths don't flatten the fan.
- * Domain ends and ticks land on round numbers.
+ * Round, evenly spaced ticks covering [min, max]. Tries 1/2/2.5/5 x 10^n steps; among those giving
+ * `minIntervals`-`maxIntervals` intervals it keeps the tightest range (ties: fewer ticks). The domain
+ * ends on ticks, so there is never a crowded partial tick at either edge.
  */
-export function fanAxis(a: Analysis, S0: number, targetTicks = 5): NiceAxis {
+export function niceTicks(min: number, max: number, minIntervals = 4, maxIntervals = 8): NiceAxis {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return { domain: [0, 1], ticks: [0, 1] };
+  if (max <= min) max = min + Math.abs(min || 1) * 0.1;
+  const magnitude = 10 ** Math.floor(Math.log10((max - min) / minIntervals));
+  type Candidate = { step: number; start: number; intervals: number; span: number };
+  const candidates: Candidate[] = [];
+  for (const scale of [0.1, 1, 10]) {
+    for (const f of [1, 2, 2.5, 5]) {
+      const step = f * magnitude * scale;
+      const start = min >= 0 ? Math.max(0, Math.floor(min / step) * step) : Math.floor(min / step) * step;
+      const end = Math.ceil(max / step) * step;
+      candidates.push({ step, start, intervals: Math.round((end - start) / step), span: end - start });
+    }
+  }
+  const inRange = candidates.filter((c) => c.intervals >= minIntervals && c.intervals <= maxIntervals);
+  const pool = inRange.length
+    ? inRange.sort((x, y) => x.span - y.span || x.intervals - y.intervals)
+    : candidates.sort((x, y) => Math.abs(x.intervals - minIntervals) - Math.abs(y.intervals - minIntervals));
+  const { step, start, intervals } = pool[0];
+  const ticks = Array.from({ length: intervals + 1 }, (_, i) => Number((start + i * step).toPrecision(12)));
+  return { domain: [ticks[0], ticks[ticks.length - 1]], ticks };
+}
+
+/** Y axis from the 5-95% band (with padding), so outlier sample paths don't flatten the fan. */
+export function fanAxis(a: Analysis, S0: number): NiceAxis {
   const lo = Math.min(S0, ...a.bands.p5);
   const hi = Math.max(S0, ...a.bands.p95);
   const pad = (hi - lo) * 0.08;
-  const step = niceStep((hi - lo + 2 * pad) / targetTicks);
-  const start = Math.max(0, Math.floor((lo - pad) / step) * step);
-  const end = Math.ceil((hi + pad) / step) * step;
-  const ticks: number[] = [];
-  for (let v = start; v <= end + step / 2; v += step) ticks.push(Number(v.toPrecision(12)));
-  return { domain: [start, end], ticks };
+  return niceTicks(Math.max(0, lo - pad), hi + pad, 4, 6);
+}
+
+/** X axis for the final-price histogram: round ticks spanning every bin. */
+export function histogramAxis(h: Histogram): NiceAxis {
+  return niceTicks(h.bin_edges[0], h.bin_edges[h.bin_edges.length - 1], 4, 8);
+}
+
+export interface Marker {
+  key: string;
+  x: number;
+}
+
+export interface MarkerLayout extends Marker {
+  /** Label row above the plot (0 = closest to the plot). */
+  row: number;
+  /** Which side of the line the label sits on. */
+  anchor: "start" | "middle" | "end";
+}
+
+/**
+ * Place reference-line labels so they never overlap: markers closer than `minGap` (a fraction of
+ * the axis width) go on different rows, and each close pair splits to opposite sides of its lines.
+ */
+export function layoutMarkers(markers: Marker[], domain: [number, number], minGap = 0.16): MarkerLayout[] {
+  const width = domain[1] - domain[0] || 1;
+  const sorted = [...markers].sort((a, b) => a.x - b.x);
+  const close = (a: Marker, b: Marker) => Math.abs(a.x - b.x) / width < minGap;
+  const placed: MarkerLayout[] = [];
+  sorted.forEach((m, i) => {
+    let row = 0;
+    while (placed.some((p) => p.row === row && close(p, m))) row++;
+    const prev = sorted[i - 1];
+    const next = sorted[i + 1];
+    const nearEdge = (m.x - domain[0]) / width < 0.06 || (domain[1] - m.x) / width < 0.06;
+    let anchor: MarkerLayout["anchor"] = "middle";
+    if (!nearEdge) {
+      if (next && close(m, next)) anchor = "end";
+      else if (prev && close(prev, m)) anchor = "start";
+    }
+    placed.push({ ...m, row, anchor });
+  });
+  return placed;
 }
 
 export interface HistogramBin {
