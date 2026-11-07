@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from .analyze import analyze
-from .data import PriceData, fetch_prices
+from .data import PriceData, fetch_price_history, fetch_prices
 from .errors import (
     DataFetchError,
     InsufficientDataError,
@@ -25,6 +25,12 @@ __all__ = [
     "resolve_risk_free_rate",
     "validate_rate",
     "fetch_prices",
+    "fetch_price_history",
+    "single_backtest",
+    "rolling_backtest",
+    "single_backtest_from_prices",
+    "rolling_backtest_from_prices",
+    "BacktestDateError",
     "estimate_parameters",
     "simulate_gbm",
     "analyze",
@@ -123,3 +129,12 @@ def run_simulation(
     data = fetch_prices(ticker, lookback=lookback)
     return simulate_from_prices(data, horizon, lookback=lookback, n_sims=n_sims, seed=seed,
                                 drift=drift, risk_free_rate=risk_free_rate)
+
+
+from .backtest import (  # noqa: E402  (needs _check_drift defined above)
+    BacktestDateError,
+    rolling_backtest,
+    rolling_backtest_from_prices,
+    single_backtest,
+    single_backtest_from_prices,
+)

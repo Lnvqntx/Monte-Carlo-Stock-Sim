@@ -5,7 +5,8 @@
  *   60% forest  #1F3D2B  page background (+ darker shades for depth)
  *   30% sand    #E8DCC4  text, card borders, secondary surfaces
  *   10% accent  #8B5CF6  primary button, mean path, key numbers (accent-text is a lighter tint for AA text contrast)
- *   loss        #E07A5F  downside figures only (probability of loss, VaR)
+ *   loss        #E07A5F  downside figures only (probability of loss, VaR, backtest misses)
+ *   hit         #9CCB9F  backtest "inside the band" badges only (light tint of the forest green)
  */
 @theme {
   --color-forest: #1f3d2b;
@@ -17,6 +18,7 @@
   --color-accent-strong: #7c4ef0;
   --color-accent-text: #b39dfb;
   --color-loss: #e07a5f;
+  --color-hit: #9ccb9f;
 
   --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
 

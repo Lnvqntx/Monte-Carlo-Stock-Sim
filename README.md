@@ -25,9 +25,10 @@ Enter a US or Indian ticker (e.g. `AAPL`, `RELIANCE.NS`) and a forecast horizon.
 - **Automatic parameter estimation**: drift and volatility from daily log returns
 - **Two drift models**: historical drift (default) or risk-free drift, a risk-neutral baseline at the live 13-week T-bill rate (USD) or a per-currency default, with an optional override
 - **Vectorised simulation**: 10,000 paths in a single NumPy operation, seeded and reproducible
+- **Backtesting**: rerun the model from past start dates using only the prices known then, draw what actually happened over the fan, and measure how often the 50% and 90% bands held across up to 40 rolling windows (with a calibration histogram)
 - **Risk metrics**: expected price, probability of loss, 95% Value at Risk, 5/25/50/75/95th percentile bands
 - **Interactive charts**: fan chart of simulated paths and a histogram of final prices
-- **Shareable URLs**: `?ticker=TCS.NS&horizon=1y` re-runs the same simulation (`&drift=risk_free&rate=4.5` for risk-free runs)
+- **Shareable URLs**: `?ticker=TCS.NS&horizon=1y` re-runs the same simulation (`&drift=risk_free&rate=4.5` for risk-free runs; `&mode=backtest&start=2025-05-01` or `&mode=backtest&test=rolling` for backtests)
 - **CLI** with rich terminal output and saved matplotlib charts
 - **REST API** (FastAPI) with validation, consistent error codes and a result cache
 - **Currency aware**: ₹ with Indian digit grouping for `.NS` / `.BO`, $ for US stocks
@@ -108,23 +109,53 @@ Drift dominates the outcome: AAPL's strong historical trend pulls the whole dist
 
 ### Historical vs risk-free drift
 
-<!-- TODO(Lnvqntx): fill in from a real run, e.g.
-     python cli.py --ticker AAPL --horizon 6m --no-show
-     python cli.py --ticker AAPL --horizon 6m --drift risk_free --no-show -->
-
-AAPL, 6-month horizon, 2-year lookback, 10,000 simulations, seed 42, run on **TODO date**:
+AAPL, 6-month horizon, 2-year lookback, 10,000 simulations, seed 42, run on **2026-11-07**:
 
 | AAPL | Historical drift | Risk-free drift |
 |---|---:|---:|
-| Drift μ used (annual) | **TODO%** | **TODO%** (TODO source, e.g. live ^IRX) |
-| Volatility σ (annual) | TODO% | TODO% (same) |
-| Expected price | \$TODO (TODO%) | \$TODO (TODO%) |
-| Probability of loss | TODO% | TODO% |
-| 95% VaR | TODO% | TODO% |
+| Drift μ used (annual) | **25.2%** | **4.0%** (live ^IRX) |
+| Volatility σ (annual) | 28.8% | 28.8% (same) |
+| Expected price | \$388.79 (+13.6%) | \$349.73 (+2.1%) |
+| Median price | \$380.81 | \$342.55 |
+| Probability of loss | 29.6% | 49.9% |
+| 95% VaR | 20.0% | 28.1% |
 
-Volatility is identical in both columns, so any difference comes from drift alone. TODO: one sentence on what the gap shows (e.g. how much of the historical upside comes from extrapolating the past trend).
+Volatility is identical in both columns, so any difference comes from drift alone. With historical drift, AAPL's 25% annual trend cushions the downside; removing it raises the probability of loss to about a coin flip and the 95% VaR from 20% to 28%. Historical drift can make a stock look safer than it is.
 
 ![Histogram of final prices with percentile table and model details](docs/images/distribution.png)
+
+## Backtesting
+
+A forecast range is only useful if reality usually lands inside it. The backtester ([`core/backtest.py`](backend/core/backtest.py)) checks that on the stock's own history.
+
+**No look-ahead.** For a past start date $t$, $\mu$ and $\sigma$ are estimated *only* from the closes in the lookback window ending at $t$, the horizon is simulated from $S_t$, and the result is compared with the prices that actually followed. Nothing after $t$ touches the forecast (a test shifts every later price and checks the forecast doesn't change). History is downloaded once (about 10 years) and sliced locally.
+
+**Single test.** One start date: the usual fan chart from that day with the real price path drawn on top, the actual final price's **percentile rank** within the simulated final prices, and whether it ended inside the 50% (25th–75th) and 90% (5th–95th) bands.
+
+**Rolling windows.** Up to 40 evenly spaced start dates across the available history, each with a full lookback before it and a full horizon after it. For each window it records the predicted percentiles and where the actual price landed, then summarises:
+
+- **Coverage**: the share of windows whose actual price ended inside the 50% and 90% bands. A calibrated model scores about 50% and 90%. Well below 90% means the model was **overconfident**: its bands were too narrow, typically because real returns have fat tails and volatility clusters, which GBM leaves out.
+- **PIT histogram**: a 10-bin histogram of the percentile ranks (the probability integral transform). If the model is calibrated the ranks are uniform, so the histogram is flat; tall outer bars mean outcomes kept escaping the bands, and a slope means the drift was biased.
+
+Rolling runs are vectorised: per-window $\mu$ and $\sigma$ come from cumulative sums of log returns, and final prices are drawn in one step from the exact GBM solution $S_T = S_0\,e^{(\mu - \sigma^2/2)T + \sigma\sqrt{T}Z}$, the same distribution as the daily-step simulator at the horizon. A 40-window run takes a few milliseconds of compute; the history download dominates.
+
+Caveats: windows overlap when the horizon is longer than their spacing, so they aren't independent, and 40 windows is a small sample. With risk-free drift every past start date uses **today's** default rate (historical T-bill rates aren't fetched); the output says so. Past calibration doesn't guarantee future accuracy.
+
+<!-- TODO(Lnvqntx): fill in from real runs, e.g.
+     python cli.py --ticker AAPL --horizon 6m --backtest rolling --no-show
+     python cli.py --ticker HDFCBANK.NS --horizon 6m --backtest rolling --no-show -->
+
+Rolling backtest, 6-month horizon, 2-year lookback, 40 windows, 2,000 simulations each, seed 42, run on **TODO date**:
+
+| | AAPL | HDFCBANK.NS |
+|---|---:|---:|
+| Start dates | TODO – TODO | TODO – TODO |
+| 90% band coverage (ideal 90%) | TODO% | TODO% |
+| 50% band coverage (ideal 50%) | TODO% | TODO% |
+| Below 5th / above 95th percentile (ideal 5% / 5%) | TODO% / TODO% | TODO% / TODO% |
+| Mean percentile rank (ideal 50) | TODO | TODO |
+
+TODO: one or two sentences on what the coverage shows (e.g. whether the 90% band held about 9 times in 10, and whether misses were mostly on the downside).
 
 ## Limitations
 
@@ -186,7 +217,15 @@ python cli.py --ticker AAPL --horizon 6m --drift risk_free --rate 0.045
 python cli.py --ticker RELIANCE.NS --horizon 1y --lookback 5y --sims 20000 --no-show --json output/reliance.json
 ```
 
-Charts are saved to `./output` as `<TICKER>_<horizon>_paths.png` and `<TICKER>_<horizon>_hist.png`. Run `python cli.py --help` for all options.
+```bash
+python cli.py --ticker AAPL --horizon 6m --backtest 2025-05-01
+```
+
+```bash
+python cli.py --ticker AAPL --horizon 6m --backtest rolling
+```
+
+Charts are saved to `./output` as `<TICKER>_<horizon>_paths.png` and `<TICKER>_<horizon>_hist.png`; backtests save `<TICKER>_<horizon>_backtest_<start>.png` (fan chart with the actual path) or `<TICKER>_<horizon>_calibration.png` (PIT histogram). `--backtest rolling` defaults to 2,000 simulations per start date and takes `--windows N` (5–40). Run `python cli.py --help` for all options.
 
 **Tests** (no network needed; Yahoo Finance is mocked):
 
@@ -207,6 +246,7 @@ Base URL: `https://monte-carlo-stock-api.vercel.app` · [Swagger docs](https://m
 | `GET` | `/` | Service info with links to the docs, health check and website |
 | `GET` | `/api/health` | Health check, returns `{"status": "ok"}` |
 | `POST` | `/api/simulate` | Run a simulation |
+| `POST` | `/api/backtest` | Backtest past forecasts (single start date or rolling windows) |
 
 Request body for `POST /api/simulate`:
 
@@ -230,6 +270,21 @@ curl -s -X POST https://monte-carlo-stock-api.vercel.app/api/simulate -H "Conten
 
 The response contains `metadata` (ticker, currency, company name, last date), `parameters` (`S0`, `mu` = drift used, `mu_historical`, `sigma`), `settings` (including `drift`, `risk_free_rate` and `rate_source`, both `null` for historical drift), and `analysis` (final-price stats, `expected_return_pct`, `prob_below_start`, `var_95_pct`, percentile bands, mean path, sample paths, histogram).
 
+Request body for `POST /api/backtest` takes the same `ticker`, `horizon`, `lookback`, `seed`, `drift` and `risk_free_rate` fields, plus:
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `mode` | string | required | `single` or `rolling` |
+| `start_date` | string | required for `single` | `YYYY-MM-DD`, in the past; the last close on or before it is the start. Rejected for `rolling` |
+| `n_sims` | integer | `10000` single / `2000` rolling | 1,000 to 20,000 |
+| `n_windows` | integer | `40` | `rolling` only, 5 to 40 |
+
+```bash
+curl -s -X POST https://monte-carlo-stock-api.vercel.app/api/backtest -H "Content-Type: application/json" -d '{"mode": "rolling", "ticker": "AAPL", "horizon": "6m"}'
+```
+
+A single backtest returns the same `metadata`, `parameters`, `settings` and `analysis` as a simulation (from the start date) plus `backtest` (`start_date`, `end_date`, `actual_path` aligned with `analysis.days`, `actual_final`, `percentile_rank`, `inside_50`, `inside_90`). A rolling backtest returns `summary` (`coverage_50`, `coverage_90`, `below_p5`, `above_p95`, `mean_percentile_rank`, `pit_histogram`) and `windows` (start date, `S0`, `actual_final`, `p5`–`p95`, `percentile_rank`, `inside_50`, `inside_90` per window). A start date too recent for the horizon is `invalid_input` and the message names the latest valid date; too little history before it is `insufficient_data`.
+
 Errors always have the shape `{"error": {"code": "...", "message": "..."}}`:
 
 | Code | HTTP | When |
@@ -245,7 +300,7 @@ Errors always have the shape `{"error": {"code": "...", "message": "..."}}`:
 ```
 .
 ├── backend/
-│   ├── core/            # maths: data fetch, horizon parsing, estimation, risk-free rates, GBM simulation, risk analysis
+│   ├── core/            # maths: data fetch, horizon parsing, estimation, risk-free rates, GBM simulation, risk analysis, backtesting
 │   ├── api/             # FastAPI app: routes, schemas, response trimming, TTL cache
 │   ├── tests/           # pytest suite (network mocked)
 │   ├── cli.py           # terminal interface
@@ -254,9 +309,9 @@ Errors always have the shape `{"error": {"code": "...", "message": "..."}}`:
 │   └── render.yaml      # Render fallback deployment
 ├── frontend/
 │   ├── app/             # Next.js layout, page, global styles, Open Graph image
-│   ├── components/      # simulator form, results, fan chart, histogram
+│   ├── components/      # simulator form, results, fan chart, histogram, backtest results, calibration chart
 │   ├── lib/             # API client, types, formatting, chart helpers (with Vitest tests)
-│   └── mocks/           # sample API response for demo mode
+│   └── mocks/           # sample API responses (simulations and backtests) for demo mode
 ├── docs/images/         # screenshots
 └── DEPLOY.md            # deployment guide
 ```
@@ -267,7 +322,6 @@ Both apps deploy to Vercel from this repository as two projects: the API with Ro
 
 ## Roadmap
 
-- Backtesting: compare past forecasts with realised prices
 - Fat-tailed returns (Student-t shocks)
 - Multi-asset portfolios with correlated paths
 

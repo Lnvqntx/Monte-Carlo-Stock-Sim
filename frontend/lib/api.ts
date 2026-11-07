@@ -1,4 +1,10 @@
-import type { ApiErrorBody, SimulateRequest, SimulateResponse } from "./types";
+import type {
+  ApiErrorBody,
+  BacktestRequest,
+  BacktestResponse,
+  SimulateRequest,
+  SimulateResponse,
+} from "./types";
 
 export const DEMO_MODE = process.env.NEXT_PUBLIC_DEMO_MODE === "true";
 
@@ -28,15 +34,19 @@ export function backendUnreachableCode(env: string | undefined = process.env.NOD
   return env === "production" ? "data_unavailable" : "network_error";
 }
 
-async function simulateDemo(req: SimulateRequest, signal?: AbortSignal): Promise<SimulateResponse> {
-  // Short pause so loading states are visible in demo mode.
-  await new Promise<void>((resolve, reject) => {
+/** Short pause so loading states are visible in demo mode. */
+function demoDelay(signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     const t = setTimeout(resolve, 650);
     signal?.addEventListener("abort", () => {
       clearTimeout(t);
       reject(new DOMException("Aborted", "AbortError"));
     });
   });
+}
+
+async function simulateDemo(req: SimulateRequest, signal?: AbortSignal): Promise<SimulateResponse> {
+  await demoDelay(signal);
   const mod =
     req.drift === "risk_free"
       ? await import("@/mocks/sample-response-risk-free.json")
@@ -44,13 +54,25 @@ async function simulateDemo(req: SimulateRequest, signal?: AbortSignal): Promise
   return (mod.default ?? mod) as unknown as SimulateResponse;
 }
 
-/** POST /api/simulate (relative path; proxied to the Python API by the BACKEND_URL rewrite in next.config). */
-export async function simulate(req: SimulateRequest, signal?: AbortSignal): Promise<SimulateResponse> {
-  if (DEMO_MODE) return simulateDemo(req, signal);
+async function backtestDemo(req: BacktestRequest, signal?: AbortSignal): Promise<BacktestResponse> {
+  await demoDelay(signal);
+  const mod =
+    req.mode === "rolling"
+      ? await import("@/mocks/sample-backtest-rolling.json")
+      : await import("@/mocks/sample-backtest-single.json");
+  return (mod.default ?? mod) as unknown as BacktestResponse;
+}
 
+/** POST JSON to a relative /api path, mapping failures to SimulationError. */
+async function postJson<T>(
+  path: string,
+  req: object,
+  isResult: (body: object) => boolean,
+  signal?: AbortSignal,
+): Promise<T> {
   let res: Response;
   try {
-    res = await fetch("/api/simulate", {
+    res = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(req),
@@ -73,8 +95,25 @@ export async function simulate(req: SimulateRequest, signal?: AbortSignal): Prom
     // Non-JSON error (no rewrite configured, or the proxy couldn't reach the API).
     throw new SimulationError(backendUnreachableCode(), `Unexpected ${res.status} response`, res.status);
   }
-  if (!body || typeof body !== "object" || !("analysis" in body)) {
-    throw new SimulationError(backendUnreachableCode(), "Response was not a simulation result", res.status);
+  if (!body || typeof body !== "object" || !isResult(body)) {
+    throw new SimulationError(backendUnreachableCode(), "Response was not a valid result", res.status);
   }
-  return body as SimulateResponse;
+  return body as T;
+}
+
+/** POST /api/simulate (relative path; proxied to the Python API by the BACKEND_URL rewrite in next.config). */
+export async function simulate(req: SimulateRequest, signal?: AbortSignal): Promise<SimulateResponse> {
+  if (DEMO_MODE) return simulateDemo(req, signal);
+  return postJson<SimulateResponse>("/api/simulate", req, (b) => "analysis" in b, signal);
+}
+
+/** POST /api/backtest: compare a past forecast (single) or many (rolling) with what actually happened. */
+export async function backtest(req: BacktestRequest, signal?: AbortSignal): Promise<BacktestResponse> {
+  if (DEMO_MODE) return backtestDemo(req, signal);
+  return postJson<BacktestResponse>(
+    "/api/backtest",
+    req,
+    (b) => (req.mode === "rolling" ? "summary" in b : "backtest" in b),
+    signal,
+  );
 }

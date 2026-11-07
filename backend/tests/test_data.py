@@ -82,3 +82,33 @@ def test_live_tbill_rate_times_out(monkeypatch):
     start = time.monotonic()
     assert fetch_live_tbill_rate(timeout=0.05) is None
     assert time.monotonic() - start < 0.5
+
+
+# --- date-range history (backtests) -------------------------------------------
+
+def test_fetch_price_history_passes_date_range(patch_yf):
+    from datetime import date
+
+    from core.data import fetch_price_history
+
+    fake = patch_yf(_df(300), meta={"currency": "USD"})
+    data = fetch_price_history(" aapl ", date(2016, 11, 1), "2026-11-07")
+    call = fake.calls[0]
+    assert call["start"] == "2016-11-01" and call["end"] == "2026-11-07"
+    assert "period" not in call and call["auto_adjust"] is True
+    assert data.ticker == "AAPL" and len(data.prices) == 300
+
+    fake = patch_yf(_df(300))
+    fetch_price_history("AAPL", "2020-01-01")
+    assert "end" not in fake.calls[0]
+
+
+def test_fetch_price_history_errors(patch_yf):
+    from core.data import fetch_price_history
+
+    patch_yf(pd.DataFrame())
+    with pytest.raises(InvalidTickerError):
+        fetch_price_history("NOPE", "2020-01-01")
+    patch_yf(pd.DataFrame(), exc=ConnectionError("boom"))
+    with pytest.raises(DataFetchError):
+        fetch_price_history("AAPL", "2020-01-01")

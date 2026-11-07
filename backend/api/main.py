@@ -24,11 +24,20 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import core
+from core.backtest import BacktestDateError
 from core.errors import DataFetchError, InsufficientDataError, InvalidTickerError
 
 from .cache import DEFAULT_MAX_ENTRIES, TTLCache, ttl_from_env
-from .schemas import ErrorResponse, HealthResponse, SimulateRequest, SimulateResponse
-from .serialize import serialize_result
+from .schemas import (
+    BacktestRequest,
+    ErrorResponse,
+    HealthResponse,
+    RollingBacktestResponse,
+    SimulateRequest,
+    SimulateResponse,
+    SingleBacktestResponse,
+)
+from .serialize import serialize_backtest, serialize_result
 
 logger = logging.getLogger("api")
 
@@ -41,6 +50,7 @@ INVALID_TICKER_MESSAGE = (
 )
 DATA_UNAVAILABLE_MESSAGE = "The market data provider is unavailable. Try again shortly."
 INTERNAL_ERROR_MESSAGE = "Something went wrong while running the simulation."
+BACKTEST_ERROR_MESSAGE = "Something went wrong while running the backtest."
 WEBSITE_URL = "https://monte-carlo-stock-sim.vercel.app"
 
 
@@ -116,6 +126,45 @@ def _run_trimmed(req: SimulateRequest) -> dict[str, Any]:
         raise APIError(500, "internal_error", INTERNAL_ERROR_MESSAGE)
 
 
+def backtest_cache_key(req: BacktestRequest) -> tuple:
+    """Everything that changes a backtest result. New closes arrive daily; the TTL covers that."""
+    return ("backtest", req.mode, req.ticker, req.horizon, req.lookback,
+            req.start_date.isoformat() if req.start_date else None, req.sims,
+            req.windows if req.mode == "rolling" else None, req.seed, req.drift,
+            req.risk_free_rate)
+
+
+def _run_backtest(req: BacktestRequest) -> dict[str, Any]:
+    """Run a core backtest and trim it, mapping core errors to APIError."""
+    try:
+        if req.mode == "single":
+            result = core.single_backtest(req.ticker, req.start_date, req.horizon,
+                                          lookback=req.lookback, drift=req.drift,
+                                          n_sims=req.sims, seed=req.seed,
+                                          risk_free_rate=req.risk_free_rate)
+        else:
+            result = core.rolling_backtest(req.ticker, req.horizon, lookback=req.lookback,
+                                           drift=req.drift, n_windows=req.windows,
+                                           n_sims=req.sims, seed=req.seed,
+                                           risk_free_rate=req.risk_free_rate)
+        return serialize_backtest(result)
+    except InvalidTickerError:
+        raise APIError(404, "invalid_ticker", INVALID_TICKER_MESSAGE.format(ticker=req.ticker))
+    except BacktestDateError as exc:
+        raise APIError(422, "invalid_input", str(exc))
+    except InsufficientDataError as exc:
+        hint = ("Try a later start date or a shorter lookback." if req.mode == "single"
+                else "Try a shorter lookback or horizon.")
+        raise APIError(422, "insufficient_data",
+                       f"Not enough price history for {req.ticker} to backtest: {exc}. {hint}")
+    except DataFetchError as exc:
+        logger.warning("Data fetch failed for %s: %s", req.ticker, exc)
+        raise APIError(502, "data_unavailable", DATA_UNAVAILABLE_MESSAGE)
+    except Exception:
+        logger.exception("Unexpected error backtesting %s", req.ticker)
+        raise APIError(500, "internal_error", BACKTEST_ERROR_MESSAGE)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Monte Carlo Stock Simulator API",
@@ -165,7 +214,8 @@ def create_app() -> FastAPI:
         return {
             "service": "Monte Carlo Stock Simulator API",
             "description": ("GBM Monte Carlo simulation of stock prices from Yahoo Finance "
-                            "history. POST /api/simulate to run one. Not financial advice."),
+                            "history. POST /api/simulate to run one, POST /api/backtest to "
+                            "check past forecasts against reality. Not financial advice."),
             "links": {"docs": "/docs", "health": "/api/health", "website": WEBSITE_URL},
         }
 
@@ -185,6 +235,25 @@ def create_app() -> FastAPI:
             return cached
         # Cache the trimmed payload: same content the client gets, far less memory.
         payload = _run_trimmed(req)
+        cache.set(key, payload)
+        return payload
+
+    @app.post("/api/backtest",
+              response_model=SingleBacktestResponse | RollingBacktestResponse,
+              responses=error_docs, tags=["backtest"])
+    def backtest(req: BacktestRequest, request: Request) -> dict[str, Any]:
+        """Compare past forecasts with what actually happened.
+
+        mode "single": one start date, the usual fan chart data plus the realised path.
+        mode "rolling": up to 40 start dates, band coverage and a calibration histogram.
+        Parameters only ever use prices up to each start date (no look-ahead).
+        """
+        cache: TTLCache = request.app.state.cache
+        key = backtest_cache_key(req)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        payload = _run_backtest(req)
         cache.set(key, payload)
         return payload
 

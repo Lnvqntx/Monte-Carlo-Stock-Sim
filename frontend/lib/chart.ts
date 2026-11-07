@@ -12,6 +12,8 @@ export interface FanRow {
   outer: [number, number];
   /** [p25, p75] for the inner band area. */
   inner: [number, number];
+  /** Realised price (backtests only). */
+  actual?: number;
   /** Sample path values keyed s0..s49. */
   [sample: `s${number}`]: number;
 }
@@ -20,8 +22,11 @@ export function sampleKey(i: number): `s${number}` {
   return `s${i}`;
 }
 
-/** One row per kept trading day, combining bands, mean and sample paths for Recharts. */
-export function buildFanData(a: Analysis): FanRow[] {
+/**
+ * One row per kept trading day, combining bands, mean and sample paths for Recharts.
+ * `actual` (backtests) is the realised price path aligned with `a.days`.
+ */
+export function buildFanData(a: Analysis, actual?: number[]): FanRow[] {
   return a.days.map((day, i) => {
     const row = {
       day,
@@ -34,6 +39,7 @@ export function buildFanData(a: Analysis): FanRow[] {
       outer: [a.bands.p5[i], a.bands.p95[i]],
       inner: [a.bands.p25[i], a.bands.p75[i]],
     } as FanRow;
+    if (actual && actual[i] !== undefined) row.actual = actual[i];
     a.sample_paths.forEach((path, k) => {
       row[sampleKey(k)] = path[i];
     });
@@ -83,10 +89,13 @@ export function niceTicks(min: number, max: number, minIntervals = 4, maxInterva
   return { domain: [ticks[0], ticks[ticks.length - 1]], ticks };
 }
 
-/** Y axis from the 5-95% band (with padding), so outlier sample paths don't flatten the fan. */
-export function fanAxis(a: Analysis, S0: number): NiceAxis {
-  const lo = Math.min(S0, ...a.bands.p5);
-  const hi = Math.max(S0, ...a.bands.p95);
+/**
+ * Y axis from the 5-95% band (with padding), so outlier sample paths don't flatten the fan.
+ * A backtest's actual path is always kept fully in view.
+ */
+export function fanAxis(a: Analysis, S0: number, actual: number[] = []): NiceAxis {
+  const lo = Math.min(S0, ...a.bands.p5, ...actual);
+  const hi = Math.max(S0, ...a.bands.p95, ...actual);
   const pad = (hi - lo) * 0.08;
   return niceTicks(Math.max(0, lo - pad), hi + pad, 4, 6);
 }

@@ -1,10 +1,11 @@
 "use client";
 
 import type { FormEvent } from "react";
+import { APP_MODES, BACKTEST_MODES, MIN_START_DATE, ROLLING_SIMS, defaultStartDate, maxStartDate } from "@/lib/backtest";
 import { DRIFTS } from "@/lib/drift";
 import { EXAMPLE_TICKERS, HORIZONS, LOOKBACKS, SIM_COUNTS, type HorizonValue } from "@/lib/options";
 import { formatInteger } from "@/lib/format";
-import type { DriftModel, Lookback } from "@/lib/types";
+import type { AppMode, BacktestMode, DriftModel, Lookback } from "@/lib/types";
 import { ChevronIcon, SpinnerIcon } from "./icons";
 import { Card, Segmented, cx } from "./ui";
 
@@ -17,12 +18,18 @@ export interface FormState {
   drift: DriftModel;
   /** Risk-free rate override in percent as typed; "" = server default. */
   rate: string;
+  /** Simulate (default) or Backtest. */
+  mode: AppMode;
+  backtest: BacktestMode;
+  /** Backtest start date (YYYY-MM-DD); "" = the default for the horizon. */
+  startDate: string;
 }
 
 export interface FieldErrors {
   ticker?: string;
   seed?: string;
   rate?: string;
+  startDate?: string;
 }
 
 export function InputCard({
@@ -32,6 +39,7 @@ export function InputCard({
   onPickExample,
   loading,
   fieldErrors,
+  today,
 }: {
   form: FormState;
   onChange: (patch: Partial<FormState>) => void;
@@ -39,17 +47,40 @@ export function InputCard({
   onPickExample: (ticker: string) => void;
   loading: boolean;
   fieldErrors: FieldErrors;
+  /** The viewer's local date (YYYY-MM-DD), "" before hydration; bounds the start-date picker. */
+  today: string;
 }) {
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     onSubmit();
   };
+  const isBacktest = form.mode === "backtest";
+  const rolling = isBacktest && form.backtest === "rolling";
+  const maxStart = today ? maxStartDate(form.horizon, today) : undefined;
+  const startValue = form.startDate || (today ? defaultStartDate(form.horizon, today) : "");
 
   return (
     <Card as="section" aria-labelledby="sim-form-title" className="p-5 sm:p-7">
       <h2 id="sim-form-title" className="sr-only">
-        Simulation settings
+        {isBacktest ? "Backtest settings" : "Simulation settings"}
       </h2>
+      <div className="mb-6 flex flex-col gap-3 border-b border-sand/10 pb-6 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
+        <div className="w-full sm:max-w-xs">
+          <Segmented
+            name="mode"
+            legend="Mode"
+            options={APP_MODES}
+            value={form.mode}
+            onChange={(mode) => onChange({ mode })}
+            describedBy="mode-hint"
+          />
+        </div>
+        <p id="mode-hint" className="text-sm leading-relaxed text-sand/60 sm:max-w-md sm:text-right">
+          {isBacktest
+            ? "Backtest: forecast from a past date using only the prices known then, and see if reality stayed inside the bands."
+            : "Simulate: forecast the range of prices from today. Switch to Backtest to check how past forecasts held up."}
+        </p>
+      </div>
       <form onSubmit={handleSubmit} noValidate className="grid gap-7 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:gap-10">
         {/* Ticker */}
         <div className="min-w-0">
@@ -124,6 +155,54 @@ export function InputCard({
             onChange={(horizon) => onChange({ horizon })}
           />
 
+          {isBacktest ? (
+            <div className="grid gap-4">
+              <Segmented
+                name="backtest"
+                legend="Backtest type"
+                size="sm"
+                options={BACKTEST_MODES}
+                value={form.backtest}
+                onChange={(backtest) => onChange({ backtest })}
+              />
+              {rolling ? (
+                <p className="text-xs leading-relaxed text-sand/55">
+                  Up to 40 evenly spaced start dates across the last ten years or so, each with a full lookback before it and
+                  a full horizon after it, {formatInteger(ROLLING_SIMS)} paths each.
+                </p>
+              ) : (
+                <div>
+                  <label htmlFor="start-date" className="text-sm font-medium text-sand/90">
+                    Start date
+                  </label>
+                  <input
+                    id="start-date"
+                    name="start"
+                    type="date"
+                    min={MIN_START_DATE}
+                    max={maxStart}
+                    value={startValue}
+                    onChange={(e) => onChange({ startDate: e.target.value })}
+                    aria-invalid={fieldErrors.startDate ? true : undefined}
+                    aria-describedby={fieldErrors.startDate ? "start-error start-hint" : "start-hint"}
+                    className={cx(
+                      "mt-2 block h-11 w-full rounded-xl border bg-forest-950/60 px-3.5 text-sand [color-scheme:dark] transition-colors focus:border-accent-text focus:outline-none focus:ring-4 focus:ring-accent/25 focus-visible:outline-none",
+                      fieldErrors.startDate ? "border-sand/60" : "border-sand/15 hover:border-sand/30",
+                    )}
+                  />
+                  {fieldErrors.startDate ? (
+                    <p id="start-error" className="mt-2 text-sm font-medium text-sand">
+                      {fieldErrors.startDate}
+                    </p>
+                  ) : null}
+                  <p id="start-hint" className="mt-2 text-xs leading-relaxed text-sand/55">
+                    The forecast uses only prices up to this day{maxStart ? `; latest ${maxStart} so the full horizon has happened` : ""}.
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : null}
+
           <div>
             <Segmented
               name="drift"
@@ -144,7 +223,7 @@ export function InputCard({
               <span>Advanced</span>
               <span className="flex min-w-0 items-center gap-2 text-xs font-normal text-sand/55">
                 <span className="truncate">
-                  {form.lookback} lookback · {formatInteger(form.nSims)} sims · seed {form.seed || "–"}
+                  {form.lookback} lookback · {formatInteger(rolling ? ROLLING_SIMS : form.nSims)} sims · seed {form.seed || "–"}
                   {form.drift === "risk_free" && form.rate.trim() ? ` · rate ${form.rate.trim().replace(/%$/, "")}%` : ""}
                 </span>
                 <ChevronIcon className="size-4 shrink-0 transition-transform group-open:rotate-180" />
@@ -159,14 +238,16 @@ export function InputCard({
                 value={form.lookback}
                 onChange={(lookback) => onChange({ lookback })}
               />
-              <Segmented
-                name="n_sims"
-                legend="Simulations"
-                size="sm"
-                options={SIM_COUNTS.map((n) => ({ value: n, label: formatInteger(n) }))}
-                value={form.nSims}
-                onChange={(nSims) => onChange({ nSims })}
-              />
+              {rolling ? null : (
+                <Segmented
+                  name="n_sims"
+                  legend="Simulations"
+                  size="sm"
+                  options={SIM_COUNTS.map((n) => ({ value: n, label: formatInteger(n) }))}
+                  value={form.nSims}
+                  onChange={(nSims) => onChange({ nSims })}
+                />
+              )}
               <div>
                 <label htmlFor="seed" className="text-sm font-medium text-sand/90">
                   Random seed
@@ -228,7 +309,9 @@ export function InputCard({
                   </p>
                 ) : null}
                 <p id="rate-hint" className="mt-2 text-xs text-sand/55">
-                  Used only with risk-free drift. Blank uses the current T-bill rate for the stock&apos;s currency.
+                  {isBacktest
+                    ? "Used only with risk-free drift, at every past start date. Blank uses today\u2019s default rate for the stock\u2019s currency."
+                    : "Used only with risk-free drift. Blank uses the current T-bill rate for the stock\u2019s currency."}
                 </p>
               </div>
             </div>
@@ -242,8 +325,10 @@ export function InputCard({
             {loading ? (
               <>
                 <SpinnerIcon className="size-5 animate-spin" />
-                Simulating…
+                {isBacktest ? "Backtesting…" : "Simulating…"}
               </>
+            ) : isBacktest ? (
+              "Run backtest"
             ) : (
               "Run simulation"
             )}

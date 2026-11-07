@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 import pandas as pd
@@ -58,22 +59,24 @@ def _lookup_metadata(t: Any) -> tuple[str | None, str | None]:
     return currency, long_name
 
 
-def fetch_prices(ticker: str, lookback: str = "2y") -> PriceData:
-    """Fetch adjusted daily close prices for `ticker` over `lookback` (yfinance period).
-
-    Raises InvalidTickerError (no data), InsufficientDataError (< 60 days)
-    or DataFetchError (network / provider failure).
-    """
+def _normalize_symbol(ticker: str) -> str:
     symbol = (ticker or "").strip().upper()
     if not symbol:
         raise InvalidTickerError("Ticker must be a non-empty string")
+    return symbol
 
+
+def _download(symbol: str, **history_kwargs: Any) -> tuple[Any, pd.DataFrame]:
     try:
         t = yf.Ticker(symbol)
-        df = t.history(period=lookback, interval="1d", auto_adjust=True)
+        df = t.history(interval="1d", auto_adjust=True, **history_kwargs)
     except Exception as exc:  # yfinance raises a variety of network/HTTP errors
         raise DataFetchError(f"Failed to fetch data for {symbol}: {exc}") from exc
+    return t, df
 
+
+def _to_price_data(t: Any, df: pd.DataFrame | None, symbol: str) -> PriceData:
+    """Clean a yfinance history frame into PriceData, raising the usual errors."""
     if df is None or df.empty or "Close" not in df.columns:
         raise InvalidTickerError(f"No price data found for ticker {symbol!r}")
 
@@ -89,6 +92,35 @@ def fetch_prices(ticker: str, lookback: str = "2y") -> PriceData:
     currency, long_name = _lookup_metadata(t)
     last_date = pd.Timestamp(prices.index[-1]).date().isoformat()
     return PriceData(prices, symbol, currency, long_name, last_date)
+
+
+def fetch_prices(ticker: str, lookback: str = "2y") -> PriceData:
+    """Fetch adjusted daily close prices for `ticker` over `lookback` (yfinance period).
+
+    Raises InvalidTickerError (no data), InsufficientDataError (< 60 days)
+    or DataFetchError (network / provider failure).
+    """
+    symbol = _normalize_symbol(ticker)
+    t, df = _download(symbol, period=lookback)
+    return _to_price_data(t, df, symbol)
+
+
+def fetch_price_history(
+    ticker: str,
+    start: date | str,
+    end: date | str | None = None,
+) -> PriceData:
+    """Fetch adjusted daily closes from `start` (inclusive) to `end` (exclusive; default today).
+
+    Used by the backtester, which downloads one long window once and slices it locally.
+    Raises the same errors as fetch_prices.
+    """
+    symbol = _normalize_symbol(ticker)
+    kwargs: dict[str, Any] = {"start": pd.Timestamp(start).date().isoformat()}
+    if end is not None:
+        kwargs["end"] = pd.Timestamp(end).date().isoformat()
+    t, df = _download(symbol, **kwargs)
+    return _to_price_data(t, df, symbol)
 
 
 def _download_irx(timeout: float) -> float | None:
