@@ -16,3 +16,11 @@
   - 60% Forest Green `#1F3D2B` — main background.
   - 30% Sand Beige `#E8DCC4` — cards, text, secondary surfaces.
   - 10% Electric Purple `#8B5CF6` — accent only: primary button, mean path, key numbers.
+
+## How to run
+- Setup (from `backend/`): `python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt`
+- CLI (from `backend/`): `python cli.py --ticker AAPL --horizon 6m`
+  - Options: `--lookback 2y`, `--sims 10000`, `--seed 42`, `--save DIR` (default `./output`), `--no-show` (save charts without opening windows), `--json FILE` (write the full `run_simulation` result).
+  - Charts are saved as `<TICKER>_<horizon>_paths.png` and `<TICKER>_<horizon>_hist.png`.
+- Tests (from `backend/`): `python -m pytest` (no network; yfinance and `run_simulation` are mocked).
+- Code layout: `core/` = maths (do not change for UI work), `cli.py` = terminal UI on `core.run_simulation`, `plots.py` = matplotlib charts.
