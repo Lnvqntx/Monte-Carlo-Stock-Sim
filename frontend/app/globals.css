@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+/*
+ * 60/30/10 palette
+ *   60% forest  #1F3D2B  page background (+ darker shades for depth)
+ *   30% sand    #E8DCC4  text, card borders, secondary surfaces
+ *   10% accent  #8B5CF6  primary button, mean path, key numbers (accent-text is a lighter tint for AA text contrast)
+ *   loss        #E07A5F  downside figures only (probability of loss, VaR)
+ */
+@theme {
+  --color-forest: #1f3d2b;
+  --color-forest-800: #1b3726;
+  --color-forest-900: #18301f;
+  --color-forest-950: #11241a;
+  --color-sand: #e8dcc4;
+  --color-accent: #8b5cf6;
+  --color-accent-strong: #7c4ef0;
+  --color-accent-text: #b39dfb;
+  --color-loss: #e07a5f;
+
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  @keyframes shimmer {
+    0%,
+    100% {
+      opacity: 0.55;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+}
+
+html {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-forest);
+  color: var(--color-sand);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgb(139 92 246 / 0.45);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent-text);
+  outline-offset: 2px;
+}
+
+/* Subtle dotted-grid texture. */
+.bg-dots {
+  background-image: radial-gradient(rgb(232 220 196 / 0.09) 1px, transparent 1.2px);
+  background-size: 24px 24px;
+}
+
+/* Soft purple glow behind the hero. */
+.hero-glow {
+  background: radial-gradient(
+    closest-side,
+    rgb(139 92 246 / 0.32),
+    rgb(139 92 246 / 0.12) 55%,
+    transparent 100%
+  );
+  filter: blur(8px);
+}
+
+/* Recharts: keep focus rings off SVG wrappers and use the UI font. */
+.recharts-wrapper,
+.recharts-surface {
+  outline: none;
+}
+.recharts-text {
+  font-family: var(--font-sans);
+}
+
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
