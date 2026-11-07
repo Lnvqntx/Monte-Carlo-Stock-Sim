@@ -1,0 +1,6 @@
+# Local development: API deps plus the CLI (rich, matplotlib) and tests.
+-r requirements.txt
+rich>=13.0
+matplotlib>=3.8
+pytest>=8.0
+httpx>=0.27
