@@ -1,7 +1,7 @@
 "use client";
 
 import { DEMO_MODE } from "@/lib/api";
-import { assessCoverage, ordinalPercentile, summarizeCalibration, type Calibration } from "@/lib/backtest";
+import { assessCoverage, COVERAGE_NOISE_NOTE, ordinalPercentile, summarizeCalibration, type Calibration } from "@/lib/backtest";
 import { describeRateSource } from "@/lib/drift";
 import {
   formatAnnualRate,
@@ -9,7 +9,7 @@ import {
   formatHorizon,
   formatInteger,
   formatMoney,
-  formatMoneyCompact,
+  formatMoneyRange,
   formatPercent,
   formatProbability,
 } from "@/lib/format";
@@ -42,9 +42,10 @@ export function BandBadge({ inside, band }: { inside: boolean; band: "50%" | "90
   );
 }
 
-function VerdictBadge({ status, label }: { status: Calibration; label: string }) {
+function VerdictBadge({ status, label, title }: { status: Calibration; label: string; title?: string }) {
   return (
     <span
+      title={title}
       className={cx(
         "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold",
         status === "good" && "border-hit/40 bg-hit/10 text-hit",
@@ -262,13 +263,23 @@ export function SingleBacktestResults({ data }: { data: SingleBacktestResponse }
 
 // --- rolling -----------------------------------------------------------------------------
 
-function CoverageCard({ label, coverage, nominal }: { label: string; coverage: number; nominal: 0.5 | 0.9 }) {
-  const verdict = assessCoverage(coverage, nominal);
+function CoverageCard({
+  label,
+  coverage,
+  nominal,
+  nWindows,
+}: {
+  label: string;
+  coverage: number;
+  nominal: 0.5 | 0.9;
+  nWindows: number;
+}) {
+  const verdict = assessCoverage(coverage, nominal, nWindows);
   return (
     <Card className="flex flex-col p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium text-sand/70">{label}</p>
-        <VerdictBadge {...verdict} />
+        <VerdictBadge {...verdict} title={COVERAGE_NOISE_NOTE} />
       </div>
       <p
         className={cx(
@@ -279,8 +290,10 @@ function CoverageCard({ label, coverage, nominal }: { label: string; coverage: n
         {formatProbability(coverage, 0)}
       </p>
       <p className="mt-2 text-[0.8125rem] leading-relaxed text-sand/60">
-        of actual prices ended inside it. Ideal: {formatProbability(nominal, 0)}.
+        of actual prices ended inside it. Ideal: {formatProbability(nominal, 0)} ±{" "}
+        {formatProbability(2 * verdict.standardError, 0)} (2 standard errors for {nWindows} windows).
       </p>
+      <p className="mt-1 text-xs leading-relaxed text-sand/50">{COVERAGE_NOISE_NOTE}</p>
     </Card>
   );
 }
@@ -309,8 +322,8 @@ export function RollingBacktestResults({ data }: { data: RollingBacktestResponse
       />
 
       <section aria-label="Calibration summary" className="grid grid-cols-1 gap-4 min-[480px]:grid-cols-2 lg:grid-cols-4">
-        <CoverageCard label="90% band coverage" coverage={summary.coverage_90} nominal={0.9} />
-        <CoverageCard label="50% band coverage" coverage={summary.coverage_50} nominal={0.5} />
+        <CoverageCard label="90% band coverage" coverage={summary.coverage_90} nominal={0.9} nWindows={summary.n_windows} />
+        <CoverageCard label="50% band coverage" coverage={summary.coverage_50} nominal={0.5} nWindows={summary.n_windows} />
         <Card className="flex flex-col p-5">
           <p className="text-sm font-medium text-sand/70">Mean percentile</p>
           <p className="mt-3 text-3xl font-semibold tracking-tight text-accent-text sm:text-[2rem]">
@@ -377,7 +390,7 @@ export function RollingBacktestResults({ data }: { data: RollingBacktestResponse
                       <time dateTime={w.start_date}>{formatDate(w.start_date)}</time>
                     </th>
                     <td className="whitespace-nowrap px-1.5 py-2 sm:px-3 text-right text-sand/75">
-                      {formatMoneyCompact(w.p5, currency)}–{formatMoneyCompact(w.p95, currency)}
+                      {formatMoneyRange(w.p5, w.p95, currency)}
                     </td>
                     <td className={cx("whitespace-nowrap px-1.5 py-2 sm:px-3 text-right font-semibold", !w.inside_90 && "text-loss")}>
                       {money(w.actual_final)}

@@ -7,6 +7,7 @@ import {
   formatInteger,
   formatMoney,
   formatMoneyCompact,
+  formatMoneyRange,
   formatPercent,
   formatProbability,
 } from "./format";
@@ -46,6 +47,29 @@ describe("formatMoneyCompact", () => {
   });
   it("goes compact for large values", () => {
     expect(formatMoneyCompact(250_000, "USD")).toBe("$250K");
+  });
+});
+
+describe("formatMoneyRange", () => {
+  it("uses 2 decimals on both ends below 1,000 and keeps trailing zeros", () => {
+    expect(formatMoneyRange(35.4, 66.91, "USD")).toBe("$35.40–$66.91");
+    expect(formatMoneyRange(55.24, 106, "USD")).toBe("$55.24–$106.00");
+    expect(formatMoneyRange(120, 999.994, "USD")).toBe("$120.00–$999.99");
+  });
+
+  it("uses whole numbers on both ends when the larger end is 1,000 or more", () => {
+    expect(formatMoneyRange(812.37, 1204.5, "USD")).toBe("$812–$1,205");
+    expect(formatMoneyRange(1000, 1500.4, "USD")).toBe("$1,000–$1,500");
+  });
+
+  it("applies the same rule to INR", () => {
+    expect(formatMoneyRange(845.3, 990, "INR")).toBe("₹845.30–₹990.00");
+    expect(formatMoneyRange(1245.6, 1890.25, "INR")).toBe("₹1,246–₹1,890");
+  });
+
+  it("handles a missing currency and non-finite values", () => {
+    expect(formatMoneyRange(1.5, 2, null)).toBe("1.50–2.00");
+    expect(formatMoneyRange(Number.NaN, 2, "USD")).toBe("—");
   });
 });
 

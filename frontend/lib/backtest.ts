@@ -141,23 +141,34 @@ export type Calibration = "over" | "good" | "under";
 export interface CoverageVerdict {
   status: Calibration;
   label: string;
+  /** Binomial standard error of the coverage under the nominal level: sqrt(p(1-p)/n). */
+  standardError: number;
 }
 
+/** Caption for coverage verdicts: the binomial error bar is a lower bound on the real noise. */
+export const COVERAGE_NOISE_NOTE =
+  "Overlapping windows are correlated, so the true uncertainty is even larger than this error bar.";
+
 /**
- * Compare a band's coverage with its nominal level. With ~40 overlapping windows coverage is noisy,
- * so only clear misses count: 90% band below 80% (or above 97%), 50% band below 35% (or above 65%).
+ * Compare a band's coverage with its nominal level p, allowing for sampling noise: with n windows the
+ * standard error is sqrt(p(1-p)/n). Within 2 standard errors is "Within sampling noise"; below means
+ * the bands were too narrow (overconfident), above means too wide.
  */
-export function assessCoverage(coverage: number, nominal: 0.5 | 0.9): CoverageVerdict {
-  const [low, high] = nominal === 0.9 ? [0.8, 0.97] : [0.35, 0.65];
-  if (coverage < low) return { status: "over", label: "Overconfident" };
-  if (coverage > high) return { status: "under", label: "Too cautious" };
-  return { status: "good", label: "Close to ideal" };
+export function assessCoverage(coverage: number, nominal: 0.5 | 0.9, nWindows: number): CoverageVerdict {
+  const n = Math.max(1, nWindows);
+  const standardError = Math.sqrt((nominal * (1 - nominal)) / n);
+  // Tiny tolerance so a coverage exactly 2 SE away (k/n) isn't flipped by float noise.
+  const limit = 2 * standardError + 1e-9;
+  const diff = coverage - nominal;
+  if (diff < -limit) return { status: "over", label: "Bands too narrow", standardError };
+  if (diff > limit) return { status: "under", label: "Bands too wide", standardError };
+  return { status: "good", label: "Within sampling noise", standardError };
 }
 
 /** One-sentence takeaway for a rolling run, driven by the 90% band. */
 export function summarizeCalibration(s: RollingSummary): string {
   const misses = Math.round((1 - s.coverage_90) * s.n_windows);
-  const verdict = assessCoverage(s.coverage_90, 0.9).status;
+  const verdict = assessCoverage(s.coverage_90, 0.9, s.n_windows).status;
   const outOf = `${misses} of ${s.n_windows} start dates ended outside the 90% band`;
   if (verdict === "over") {
     return `${outOf}, far more than the 1 in 10 you would expect. The model was overconfident: its bands were too narrow for this stock.`;
@@ -165,7 +176,7 @@ export function summarizeCalibration(s: RollingSummary): string {
   if (verdict === "under") {
     return `${outOf}. The bands were wider than they needed to be, so the model was more cautious than necessary here.`;
   }
-  return `${outOf}, roughly the 1 in 10 a well-calibrated model would miss.`;
+  return `${outOf}, within the sampling noise around the 1 in 10 a well-calibrated model would miss.`;
 }
 
 export interface CalibrationBin {
