@@ -41,6 +41,21 @@ export function formatMoneyCompact(value: number, currency: string | null | unde
   return safeFormat(value, localeFor(currency), { ...options, style: "currency", currency });
 }
 
+/**
+ * A price range with one precision for both ends, chosen by the larger end: 2 decimals (trailing
+ * zeros kept) below 1,000, whole numbers at or above. 35.4, 66.91 -> "$35.40–$66.91".
+ */
+export function formatMoneyRange(lo: number, hi: number, currency: string | null | undefined): string {
+  if (!Number.isFinite(lo) || !Number.isFinite(hi)) return "—";
+  const digits = Math.max(Math.abs(lo), Math.abs(hi)) >= 1000 ? 0 : 2;
+  const options: Intl.NumberFormatOptions = { minimumFractionDigits: digits, maximumFractionDigits: digits };
+  const fmt = (v: number) =>
+    currency
+      ? safeFormat(v, localeFor(currency), { ...options, style: "currency", currency })
+      : safeFormat(v, "en-US", options);
+  return `${fmt(lo)}–${fmt(hi)}`;
+}
+
 /** Round half away from zero, ignoring binary noise (0.2365 * 100 = 23.649999... rounds to 23.7). */
 function roundHalfUp(value: number, digits: number): number {
   const f = 10 ** digits;

@@ -141,21 +141,23 @@ Rolling runs are vectorised: per-window $\mu$ and $\sigma$ come from cumulative 
 
 Caveats: windows overlap when the horizon is longer than their spacing, so they aren't independent, and 40 windows is a small sample. With risk-free drift every past start date uses **today's** default rate (historical T-bill rates aren't fetched); the output says so. Past calibration doesn't guarantee future accuracy.
 
-<!-- TODO(Lnvqntx): fill in from real runs, e.g.
-     python cli.py --ticker AAPL --horizon 6m --backtest rolling --no-show
-     python cli.py --ticker HDFCBANK.NS --horizon 6m --backtest rolling --no-show -->
-
-Rolling backtest, 6-month horizon, 2-year lookback, 40 windows, 2,000 simulations each, seed 42, run on **TODO date**:
+Rolling backtest, 6-month horizon, 2-year lookback, 40 windows, 2,000 simulations each, seed 42, historical drift, run on **Nov 7, 2026**:
 
 | | AAPL | HDFCBANK.NS |
 |---|---:|---:|
-| Start dates | TODO – TODO | TODO – TODO |
-| 90% band coverage (ideal 90%) | TODO% | TODO% |
-| 50% band coverage (ideal 50%) | TODO% | TODO% |
-| Below 5th / above 95th percentile (ideal 5% / 5%) | TODO% / TODO% | TODO% / TODO% |
-| Mean percentile rank (ideal 50) | TODO | TODO |
+| Start dates | Oct 24, 2018 – May 8, 2026 | Oct 25, 2018 – May 7, 2026 |
+| 90% band coverage (ideal 90%) | 88% | 85% |
+| 50% band coverage (ideal 50%) | 50% | 63% |
+| Below 5th / above 95th percentile (ideal 5% / 5%) | 5% / 8% | 13% / 3% |
+| Mean percentile rank (ideal 50) | 53 | 48 |
 
-TODO: one or two sentences on what the coverage shows (e.g. whether the 90% band held about 9 times in 10, and whether misses were mostly on the downside).
+![Rolling backtest: coverage cards and calibration histogram of percentile ranks](docs/images/backtest.png)
+
+**AAPL** is close to ideal at both levels; its few misses were mostly upside rallies (for example, the March 2020 start ended above the band after the COVID rebound).
+
+**HDFCBANK.NS** shows the fat-tail signature: too many outcomes near the middle (63% inside the 50% band) and too many crashes beyond the lower band (13% vs 5%, for example late-2019 starts that ended in the March 2020 crash). A single constant $\sigma$ makes the middle too wide and the tails too thin.
+
+Caveat: 40 overlapping 6-month windows are a small, correlated sample, so these are evidence rather than proof. With 40 windows one binomial standard error is about 5 points at the 90% level and 8 points at the 50% level (and overlap makes the real uncertainty larger), which is why the app labels coverage "Within sampling noise" unless it is more than two standard errors from ideal.
 
 ## Limitations
 
@@ -322,7 +324,7 @@ Both apps deploy to Vercel from this repository as two projects: the API with Ro
 
 ## Roadmap
 
-- Fat-tailed returns (Student-t shocks)
+- Fat-tailed returns (Student-t shocks): the [HDFCBANK.NS backtest](#backtesting) shows the classic fat-tail pattern (too many outcomes in the middle and below the 5th percentile)
 - Multi-asset portfolios with correlated paths
 
 ## License

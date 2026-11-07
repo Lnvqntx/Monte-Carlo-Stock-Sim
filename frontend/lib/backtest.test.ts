@@ -136,14 +136,25 @@ describe("calibration", () => {
     n_windows,
   });
 
-  it("flags clear misses only", () => {
-    expect(assessCoverage(0.75, 0.9).status).toBe("over");
-    expect(assessCoverage(0.85, 0.9).status).toBe("good");
-    expect(assessCoverage(0.9, 0.9).status).toBe("good");
-    expect(assessCoverage(1, 0.9).status).toBe("under");
-    expect(assessCoverage(0.3, 0.5).status).toBe("over");
-    expect(assessCoverage(0.5, 0.5).label).toBe("Close to ideal");
-    expect(assessCoverage(0.7, 0.5).status).toBe("under");
+  it("judges coverage against 2 binomial standard errors", () => {
+    // n = 40: SE(90%) = 4.74 pts, SE(50%) = 7.91 pts.
+    expect(assessCoverage(0.88, 0.9, 40)).toMatchObject({ status: "good", label: "Within sampling noise" });
+    expect(assessCoverage(0.63, 0.5, 40)).toMatchObject({ status: "good", label: "Within sampling noise" });
+    expect(assessCoverage(0.8, 0.9, 40)).toMatchObject({ status: "over", label: "Bands too narrow" });
+    expect(assessCoverage(1, 0.9, 40)).toMatchObject({ status: "under", label: "Bands too wide" });
+    expect(assessCoverage(0.3, 0.5, 40).status).toBe("over");
+    expect(assessCoverage(0.7, 0.5, 40).status).toBe("under");
+    expect(assessCoverage(0.9, 0.9, 40).standardError).toBeCloseTo(Math.sqrt(0.09 / 40), 12);
+  });
+
+  it("treats exactly 2 standard errors as within noise and tightens with more windows", () => {
+    // n = 25, p = 50%: SE = 10 pts, so 30% and 70% sit exactly on the edge.
+    expect(assessCoverage(0.3, 0.5, 25).status).toBe("good");
+    expect(assessCoverage(0.7, 0.5, 25).status).toBe("good");
+    expect(assessCoverage(0.29, 0.5, 25).status).toBe("over");
+    // 63% is noise with 40 windows but not with 400.
+    expect(assessCoverage(0.63, 0.5, 400).status).toBe("under");
+    expect(assessCoverage(0.85, 0.9, 400).status).toBe("over");
   });
 
   it("summarizes in plain English", () => {
