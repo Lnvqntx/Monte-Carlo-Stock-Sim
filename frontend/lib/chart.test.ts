@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import sample from "@/mocks/sample-response.json";
 import type { SimulateResponse } from "./types";
-import { buildFanData, buildHistogramData, dayTicks, fanAxis, niceStep } from "./chart";
+import { buildFanData, buildHistogramData, dayTicks, fanAxis, histogramAxis, layoutMarkers, niceStep, niceTicks } from "./chart";
 
 const data = sample as unknown as SimulateResponse;
 
@@ -45,5 +45,50 @@ describe("chart data builders", () => {
     expect(dayTicks(252)).toEqual([0, 63, 126, 189, 252]);
     expect(dayTicks(21)).toEqual([0, 5, 10, 15, 21]);
     expect(dayTicks(504)).toEqual([0, 126, 252, 378, 504]);
+  });
+
+  it("makes round, evenly spaced ticks that end on the domain", () => {
+    expect(niceTicks(175.05, 761.07)).toEqual({ domain: [100, 800], ticks: [100, 200, 300, 400, 500, 600, 700, 800] });
+    expect(niceTicks(2310, 4480).ticks).toEqual([2000, 2500, 3000, 3500, 4000, 4500]);
+    expect(niceTicks(12.3, 19.8).ticks).toEqual([12, 14, 16, 18, 20]);
+  });
+
+  it("gives the sample histogram an evenly spaced axis covering every bin", () => {
+    const { domain, ticks } = histogramAxis(data.analysis.histogram);
+    const edges = data.analysis.histogram.bin_edges;
+    expect(domain[0]).toBeLessThanOrEqual(edges[0]);
+    expect(domain[1]).toBeGreaterThanOrEqual(edges.at(-1)!);
+    const steps = new Set(ticks.slice(1).map((t, i) => t - ticks[i]));
+    expect(steps.size).toBe(1);
+  });
+
+  it("separates close marker labels by row and side", () => {
+    const out = layoutMarkers(
+      [
+        { key: "p5", x: 247 },
+        { key: "today", x: 297.7 },
+        { key: "median", x: 342.2 },
+      ],
+      [100, 800],
+    );
+    const byKey = Object.fromEntries(out.map((m) => [m.key, m]));
+    expect(byKey.today.row).not.toBe(byKey.median.row);
+    expect(byKey.today.anchor).toBe("end");
+    expect(byKey.median.anchor).toBe("start");
+    expect(byKey.p5.row).not.toBe(byKey.today.row);
+  });
+
+  it("keeps far-apart marker labels centred on one row", () => {
+    const out = layoutMarkers(
+      [
+        { key: "a", x: 200 },
+        { key: "b", x: 500 },
+      ],
+      [100, 800],
+    );
+    expect(out.map((m) => [m.row, m.anchor])).toEqual([
+      [0, "middle"],
+      [0, "middle"],
+    ]);
   });
 });
