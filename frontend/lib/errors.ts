@@ -61,7 +61,9 @@ export function friendlyError(
         code: c,
         title: "Can't reach the simulator",
         message:
-          "The request didn't get through. Check your connection and try again. Running locally? Make sure the API is running on port 8000 and BACKEND_URL is set.",
+          process.env.NODE_ENV === "production"
+            ? "The request didn't get through. Check your connection and try again."
+            : "The request didn't get through. Check your connection and try again. Running locally? Make sure the API is running on port 8000 and BACKEND_URL is set.",
       };
     case "internal_error":
     default:

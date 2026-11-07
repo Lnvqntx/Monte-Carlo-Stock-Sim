@@ -1,0 +1,23 @@
+# Render Blueprint: fallback host for the FastAPI API if Yahoo Finance blocks Vercel's IPs.
+# In Render: New > Blueprint > pick this repo > Blueprint Path = backend/render.yaml.
+# See DEPLOY.md, section 3.
+services:
+  - type: web
+    name: monte-carlo-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      # Not needed when the website proxies /api/* through the BACKEND_URL rewrite
+      # (requests then come from Vercel's servers, not the browser). Only set it if a
+      # browser calls this API directly, e.g. https://your-site.vercel.app
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: CACHE_TTL_SECONDS
+        value: "900"

@@ -1,0 +1,26 @@
+# Files Vercel should not upload/bundle for the API (Root Directory = backend).
+# Only index.py, api/, core/, requirements.txt, pyproject.toml and .python-version are needed.
+
+# Local tooling: CLI, charts, dev deps, Render fallback config
+cli.py
+plots.py
+requirements-dev.txt
+render.yaml
+
+# Tests and caches
+tests/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+.coverage
+htmlcov/
+
+# Local environments and output
+.venv/
+venv/
+env/
+.env
+.env.*
+output/
