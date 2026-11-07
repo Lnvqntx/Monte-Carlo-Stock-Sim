@@ -19,6 +19,15 @@ function isErrorBody(body: unknown): body is ApiErrorBody {
   return typeof err?.code === "string" && typeof err?.message === "string";
 }
 
+/**
+ * Code for an /api response that isn't the API's own JSON (HTML 404 because BACKEND_URL isn't
+ * configured, or a proxy error because the API is down). In production that's shown as
+ * "data unavailable"; in dev it's "network_error", whose copy explains how to start the API.
+ */
+export function backendUnreachableCode(env: string | undefined = process.env.NODE_ENV): string {
+  return env === "production" ? "data_unavailable" : "network_error";
+}
+
 async function simulateDemo(signal?: AbortSignal): Promise<SimulateResponse> {
   // Short pause so loading states are visible in demo mode.
   await new Promise<void>((resolve, reject) => {
@@ -32,7 +41,7 @@ async function simulateDemo(signal?: AbortSignal): Promise<SimulateResponse> {
   return (mod.default ?? mod) as unknown as SimulateResponse;
 }
 
-/** POST /api/simulate (relative path; proxied to the Python API by next.config rewrites in dev). */
+/** POST /api/simulate (relative path; proxied to the Python API by the BACKEND_URL rewrite in next.config). */
 export async function simulate(req: SimulateRequest, signal?: AbortSignal): Promise<SimulateResponse> {
   if (DEMO_MODE) return simulateDemo(signal);
 
@@ -58,11 +67,11 @@ export async function simulate(req: SimulateRequest, signal?: AbortSignal): Prom
 
   if (!res.ok) {
     if (isErrorBody(body)) throw new SimulationError(body.error.code, body.error.message, res.status);
-    // Non-JSON error (e.g. the dev proxy couldn't reach the API): treat as unreachable.
-    throw new SimulationError("network_error", `Unexpected ${res.status} response`, res.status);
+    // Non-JSON error (no rewrite configured, or the proxy couldn't reach the API).
+    throw new SimulationError(backendUnreachableCode(), `Unexpected ${res.status} response`, res.status);
   }
   if (!body || typeof body !== "object" || !("analysis" in body)) {
-    throw new SimulationError("network_error", "Response was not a simulation result", res.status);
+    throw new SimulationError(backendUnreachableCode(), "Response was not a simulation result", res.status);
   }
   return body as SimulateResponse;
 }

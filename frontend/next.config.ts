@@ -1,8 +1,16 @@
 import type { NextConfig } from "next";
+import { parseBackendUrl } from "./lib/backend-url";
 
-// Local dev: set BACKEND_URL=http://localhost:8000 so /api/* is proxied to the FastAPI server.
-// Production: the Python API is served at /api on the same domain, so no rewrite is added.
-const backendUrl = process.env.BACKEND_URL?.replace(/\/+$/, "");
+// The browser always calls the relative /api/*. When BACKEND_URL is set, /api/* is proxied
+// there: http://localhost:8000 in local dev, the API project's URL on Vercel.
+// This file runs at build time, so the rewrite is baked into the build: after changing
+// BACKEND_URL on Vercel, redeploy. A missing or invalid value skips the rewrite (with a
+// build-log warning) instead of failing the build; the site then shows "data unavailable".
+const backend = parseBackendUrl(process.env.BACKEND_URL);
+
+if (!backend.ok && (backend.reason === "invalid" || process.env.VERCEL)) {
+  console.warn(`\n⚠ ${backend.detail}. /api/* will not be proxied; simulations will fail until it is fixed.\n`);
+}
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
@@ -16,8 +24,8 @@ const nextConfig: NextConfig = {
     },
   },
   async rewrites() {
-    if (!backendUrl) return [];
-    return [{ source: "/api/:path*", destination: `${backendUrl}/api/:path*` }];
+    if (!backend.ok) return [];
+    return [{ source: "/api/:path*", destination: `${backend.url}/api/:path*` }];
   },
 };
 

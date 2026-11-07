@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { friendlyError, normalizeErrorCode } from "./errors";
 
 describe("friendlyError", () => {
@@ -41,6 +41,15 @@ describe("friendlyError", () => {
     const e = friendlyError("network_error");
     expect(e.title).toBe("Can't reach the simulator");
     expect(e.message).toMatch(/port 8000/);
+  });
+
+  describe("in a production build", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("drops the local-dev hint from network failures", () => {
+      vi.stubEnv("NODE_ENV", "production");
+      expect(friendlyError("network_error").message).not.toMatch(/port 8000|BACKEND_URL/);
+    });
   });
 
   it("does not leak server detail for codes other than invalid_input", () => {
